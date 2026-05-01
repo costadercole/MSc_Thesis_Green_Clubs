@@ -43,15 +43,24 @@ def save(fig, name):
 # 1. h(t) and s(t) — aggregate dynamics
 # ─────────────────────────────────────────────────────────────────────────────
 
-fig, ax = plt.subplots(figsize=(7, 4))
-ax.plot(PERIODS, agg["h"], color="#d6604d", linewidth=2, label="h  (high-emission firm share)")
-ax.plot(PERIODS, agg["s"], color="#2166ac", linewidth=2, label="s  (strict jurisdiction share)")
-ax.set_xlabel("Period")
-ax.set_ylabel("Share")
-ax.set_ylim(-0.05, 1.05)
-ax.set_title("Aggregate dynamics: firm type and policy shares")
-ax.legend()
-ax.grid(alpha=0.3)
+fig, (ax_h, ax_s) = plt.subplots(1, 2, figsize=(12, 4))
+
+ax_h.plot(PERIODS, agg["h"], color="#d6604d", linewidth=2)
+ax_h.set_xlabel("Period")
+ax_h.set_ylabel("Share")
+ax_h.set_ylim(-0.05, 1.05)
+ax_h.set_title("h(t) — high-emission firm share")
+ax_h.grid(alpha=0.3)
+
+ax_s.plot(PERIODS, agg["s"], color="#2166ac", linewidth=2)
+ax_s.set_xlabel("Period")
+ax_s.set_ylabel("Share")
+ax_s.set_ylim(-0.05, 1.05)
+ax_s.set_title("s(t) — strict jurisdiction share")
+ax_s.grid(alpha=0.3)
+
+fig.suptitle("Aggregate dynamics", fontsize=13)
+fig.tight_layout()
 save(fig, "1_aggregate_dynamics")
 
 
@@ -107,11 +116,9 @@ for jname in JURISDICTIONS:
             [row["period"], sub.iloc[k+1]["period"]],
             [row["price"],  sub.iloc[k+1]["price"]],
             color=POLICY_COLOR[row["policy"]],
-            linewidth=2,
+            linewidth=0.5,
         )
-    # label at last point
-    last = sub.iloc[-1]
-    ax.text(last["period"] + 0.1, last["price"], jname, fontsize=8, va="center")
+    pass  # labels omitted for large N
 
 legend_handles = [
     mpatches.Patch(color=POLICY_COLOR["S"], label="Strict policy"),
@@ -253,6 +260,7 @@ save(fig, "8_relocations")
 # 9. Policy change timeline
 # ─────────────────────────────────────────────────────────────────────────────
 
+n_jur = len(JURISDICTIONS)
 fig, ax = plt.subplots(figsize=(7, max(3, n_jur * 0.8 + 1)))
 y_pos = {j: i for i, j in enumerate(JURISDICTIONS)}
 
@@ -287,6 +295,53 @@ legend_handles = [
 ax.legend(handles=legend_handles, loc="upper right")
 ax.grid(axis="x", alpha=0.3)
 save(fig, "9_policy_timeline")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 10. Trade flows — price gap and import competition by policy type
+# ─────────────────────────────────────────────────────────────────────────────
+
+import params as cfg
+
+fig, axes = plt.subplots(1, 2, figsize=(13, 4))
+
+# Left: price gap strict − lax over time
+strict_p = jur[jur["policy"] == "S"].groupby("period")["price"].mean()
+lax_p    = jur[jur["policy"] == "L"].groupby("period")["price"].mean()
+gap      = (strict_p - lax_p).reindex(PERIODS)
+axes[0].plot(PERIODS, gap, color="black", linewidth=2)
+axes[0].axhline(0, linestyle="--", color="grey", linewidth=1)
+axes[0].fill_between(PERIODS, gap, 0,
+                     where=(gap > 0), color="#d6604d", alpha=0.15,
+                     label="Strict more expensive")
+axes[0].fill_between(PERIODS, gap, 0,
+                     where=(gap < 0), color="#2166ac", alpha=0.15,
+                     label="Lax more expensive")
+axes[0].set_xlabel("Period")
+axes[0].set_ylabel("p*_strict − p*_lax")
+axes[0].set_title("Price gap: strict vs lax jurisdictions")
+axes[0].legend(fontsize=8)
+axes[0].grid(alpha=0.3)
+
+# Right: mean effective importers by market policy type
+for pol, color, label in [("S", POLICY_COLOR["S"], "Strict markets"),
+                           ("L", POLICY_COLOR["L"], "Lax markets")]:
+    sub = jur[jur["policy"] == pol].groupby("period")["f_imported"].mean()
+    if not sub.empty:
+        axes[1].plot(sub.index, sub.values, color=color, linewidth=2, label=label)
+overall = jur.groupby("period")["f_imported"].mean()
+axes[1].plot(overall.index, overall.values, color="black",
+             linewidth=1.5, linestyle="--", label="Economy-wide mean")
+axes[1].set_xlabel("Period")
+axes[1].set_ylabel("Mean effective importers per market")
+axes[1].set_title("Import competition by market type")
+axes[1].legend()
+axes[1].grid(alpha=0.3)
+
+fig.suptitle(f"Trade flows  (c_trade={cfg.c_trade},  τ_BA={cfg.tau_BA},  t={cfg.t})",
+             fontsize=11)
+fig.tight_layout()
+save(fig, "10_trade_flows")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

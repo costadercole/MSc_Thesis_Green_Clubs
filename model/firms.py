@@ -61,13 +61,18 @@ def relocate_firms(
     pi_H: np.ndarray,        # (N,) per-firm variable profit of H-type, per jurisdiction
     p: Params,
     rng: np.random.Generator,
+    W: np.ndarray = None,    # (N, N) weight matrix; if provided, restricts relocation to neighbours
 ) -> np.ndarray:
     """
     Update firm_loc in-place for high-emission firms in strict jurisdictions.
 
-    For each H-firm in a strict jurisdiction i, compute the best lax jurisdiction j
-    (highest profit gain), compute relocation probability µ_ij (eq. 3.17), and move
-    the firm with that probability.
+    For each H-firm in strict jurisdiction i, find the best lax neighbour j
+    (highest pi_H among lax jurisdictions adjacent to i in W), compute the
+    relocation probability µ_ij (eq. 3.17), and move the firm with that
+    probability.  Restricting to neighbours prevents unrealistic global
+    teleportation and preserves the network structure.
+
+    Falls back to the global best lax jurisdiction if W is None (backward compat).
 
     Returns updated firm_loc.
     """
@@ -79,16 +84,23 @@ def relocate_firms(
     if len(h_in_strict) == 0:
         return firm_loc
 
-    # Best lax jurisdiction by profit
-    best_lax = lax_jurisdictions[np.argmax(pi_H[lax_jurisdictions])]
-    pi_best_lax = pi_H[best_lax]
-
     for idx in h_in_strict:
         i = firm_loc[idx]
-        delta_pi = pi_best_lax - pi_H[i]
+
+        # Candidate destinations: lax neighbours of jurisdiction i
+        if W is not None:
+            candidates = [j for j in lax_jurisdictions if W[i, j] > 0]
+        else:
+            candidates = list(lax_jurisdictions)
+
+        if not candidates:
+            continue
+
+        best_dest = candidates[int(np.argmax(pi_H[candidates]))]
+        delta_pi = pi_H[best_dest] - pi_H[i]
         mu_ij = p.mu * min(1.0, max(0.0, delta_pi / p.pi_ref))
         if mu_ij > 0 and rng.random() < mu_ij * p.dt:
-            firm_loc[idx] = best_lax
+            firm_loc[idx] = best_dest
 
     return firm_loc
 

@@ -5,6 +5,7 @@ Saves four CSV files to output/ at the end of the run.
 
 import csv
 import os
+import sys
 import numpy as np
 import params as cfg
 from params import Params
@@ -22,25 +23,32 @@ from model.jurisdictions import (
 N      = cfg.N
 M      = len(cfg.firms_init)
 JNAMES = [f"J{i+1}" for i in range(N)]
-VERBOSE = N <= 10   # full per-jurisdiction printing only for small N
 
 firm_loc  = np.array([f[0] for f in cfg.firms_init])
 firm_type = np.array([1 if f[1] == "H" else 0 for f in cfg.firms_init])
 sigma     = np.array(cfg.sigma_init, dtype=int)
 P         = np.array(cfg.P_init, dtype=float)
 
-G, W = build_network(N, cfg.k, cfg.topology, cfg.seed)
+G, W  = build_network(N, cfg.k, cfg.topology, cfg.seed)
 k_eff = effective_degree(G)
 
-# pi_ref: variable profit of H-firm in lax jurisdictions at t=0 — eq. (3.17)
+# pi_ref: mean Δπ seen by a relocating H-firm at t=0 — eq. (3.17).
+# For each strict jurisdiction i, find its best lax neighbour j and take
+# Δπ = pi_H[j] - pi_H[i].  This matches the local-neighbour relocation rule
+# and ensures mu_ij = Δπ/pi_ref ≈ 1 for a typical first-period move.
 _fH0, _fL0 = count_firms(firm_loc, firm_type, N)
 _ps0, _     = equilibrium_prices_with_trade(
     _fH0, _fL0, sigma, P, W,
     cfg.c_H, cfg.c_L, cfg.t, cfg.c_trade, cfg.tau_BA, cfg.a, cfg.b,
 )
-_piH0, _    = firm_variable_profits(_ps0, _fH0, _fL0, sigma, P, cfg.c_H, cfg.c_L, cfg.t, cfg.b)
-lax_idx     = np.where(sigma == 0)[0]
-pi_ref_val  = float(np.mean(_piH0[lax_idx])) if len(lax_idx) else 1.0
+_piH0, _   = firm_variable_profits(_ps0, _fH0, _fL0, sigma, P, cfg.c_H, cfg.c_L, cfg.t, cfg.b)
+strict_idx = np.where(sigma == 1)[0]
+_deltas = []
+for _i in strict_idx:
+    _lax_nbrs = [_j for _j in range(N) if W[_i, _j] > 0 and sigma[_j] == 0]
+    if _lax_nbrs:
+        _deltas.append(float(np.max(_piH0[_lax_nbrs])) - float(_piH0[_i]))
+pi_ref_val = max(float(np.mean(_deltas)), 1.0) if _deltas else 1.0
 
 # Params instance for model/ functions
 p = Params(
@@ -63,28 +71,27 @@ rows_jurisdiction = []
 rows_relocations  = []
 rows_policy       = []
 
-print(f"N={N}  M={M}  k={k_eff:.1f}  topology={cfg.topology}")
-print(f"pi_ref = {pi_ref_val:.2f}  (H-firm variable profit in lax jurisdictions at t=0)")
-print(f"s0 = {float(np.mean(sigma)):.2f}   h0 = {float(np.mean(firm_type)):.2f}")
+# Validation moment accumulators (populated in the loop)
+_val_price_gaps   = []   # price gap whenever both policy types coexist
+_val_import_share = []   # quantity-weighted import share, SS window (last 20%)
+_val_ss_thresh    = int(cfg.T * 0.8)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helpers
+# Progress bar helper
 # ─────────────────────────────────────────────────────────────────────────────
 
-def state_summary(sigma, f_H, f_L, firm_type):
-    return (f"h={np.mean(firm_type):.3f}  s={np.mean(sigma):.3f}  "
-            f"f_H_total={int(f_H.sum())}  f_L_total={int(f_L.sum())}")
+def _progress(period, total, width=40):
+    filled = int(width * period / total)
+    bar    = "█" * filled + "░" * (width - filled)
+    pct    = 100 * period / total
+    sys.stdout.write(f"\r  [{bar}] {pct:5.1f}%  period {period}/{total}")
+    sys.stdout.flush()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Simulation loop
 # ─────────────────────────────────────────────────────────────────────────────
 
-SEP = "=" * 66
-
 for period in range(1, cfg.T + 1):
-    print(f"\n{SEP}")
-    print(f"  PERIOD {period}")
-    print(SEP)
 
     # (i) Equilibrium prices — eqs. (3.12) + trade
     f_H, f_L = count_firms(firm_loc, firm_type, N)
@@ -93,40 +100,12 @@ for period in range(1, cfg.T + 1):
         p.c_H, p.c_L, p.t, p.c_trade, p.tau_BA, p.a, p.b,
     )
 
-    print(f"\nStart: {state_summary(sigma, f_H, f_L, firm_type)}")
-
-    if VERBOSE:
-        print(f"\n[eq. 3.12+trade]  Prices:")
-        for i in range(N):
-            f_i   = int(f_H[i] + f_L[i])
-            c_bar = (f_H[i] * (p.c_H + p.t * sigma[i]) + f_L[i] * p.c_L) / max(f_i, 1)
-            print(f"  {JNAMES[i]} ({'S' if sigma[i] else 'L'}, "
-                  f"f_dom={f_i}, f_imp≈{exp_counts[i]:.1f}):  "
-                  f"c̄={c_bar:.2f}  p*={p_star[i]:.2f}")
-    else:
-        strict_mask = sigma == 1
-        lax_mask    = sigma == 0
-        print(f"  mean p* strict={np.mean(p_star[strict_mask]):.2f}"
-              f"  lax={np.mean(p_star[lax_mask]):.2f}"
-              f"  mean f_imp={np.mean(exp_counts):.2f}")
-
     # (ii) Firm profits — eqs. (3.14)–(3.15)
     pi_H, pi_L = firm_variable_profits(p_star, f_H, f_L, sigma, P, p.c_H, p.c_L, p.t, p.b)
     pi_H_bar, pi_L_bar = average_profits(firm_loc, firm_type, pi_H, pi_L, p.F)
 
-    if VERBOSE:
-        print(f"\n[eq. 3.15]  Variable profit per jurisdiction:")
-        for i in range(N):
-            print(f"  {JNAMES[i]}:  π_H={pi_H[i]:10.2f}   π_L={pi_L[i]:10.2f}")
-    print(f"[eq. 3.14]  π̄_H={pi_H_bar:.2f}   π̄_L={pi_L_bar:.2f}"
-          f"   diff={pi_H_bar - pi_L_bar:.2f}")
-
     # Tariff payoffs — eq. (3.6)
     T_vec = tariff_payoffs(sigma, W, p.tau)
-    if VERBOSE:
-        print(f"\n[eq. 3.6]  Tariff payoffs:")
-        for i in range(N):
-            print(f"  {JNAMES[i]}:  T={T_vec[i]:+.2f}")
 
     # Per-capita welfare — eq. (3.22)
     welfare_pc = np.zeros(N)
@@ -135,45 +114,57 @@ for period in range(1, cfg.T + 1):
     tax_arr    = np.zeros(N)
     tariff_arr = np.zeros(N)
     damage_arr = np.zeros(N)
-
     for i in range(N):
-        wage        = p.w_bar * (f_H[i] + f_L[i]) / P[i]
-        cs          = (p.a - p_star[i]) ** 2 / (2 * p.b)
-        tax         = (p.t * f_H[i] / P[i]) if sigma[i] == 1 else 0.0
-        tariff      = T_vec[i] / P[i]
-        damage      = -p.delta * f_H[i] / P[i]
-        wpc         = wage + cs + tax + tariff + damage
-        welfare_pc[i]  = wpc
+        wage           = p.w_bar * (f_H[i] + f_L[i]) / P[i]
+        cs             = (p.a - p_star[i]) ** 2 / (2 * p.b)
+        tax            = (p.t * f_H[i] / P[i]) if sigma[i] == 1 else 0.0
+        tariff         = T_vec[i] / P[i]
+        damage         = -p.delta * f_H[i] / P[i]
+        welfare_pc[i]  = wage + cs + tax + tariff + damage
         wage_arr[i]    = wage
         cs_arr[i]      = cs
         tax_arr[i]     = tax
         tariff_arr[i]  = tariff
         damage_arr[i]  = damage
 
-    if VERBOSE:
-        print(f"\n[eq. 3.22]  Per-capita welfare:")
-        for i in range(N):
-            print(f"  {JNAMES[i]} ({'S' if sigma[i] else 'L'}):  "
-                  f"wage={wage_arr[i]:.3f}  CS={cs_arr[i]:.3f}  "
-                  f"tax={tax_arr[i]:.3f}  tariff={tariff_arr[i]:+.3f}  "
-                  f"dmg={damage_arr[i]:.3f}   W/P={welfare_pc[i]:.3f}")
-    else:
-        strict_mask = sigma == 1
-        lax_mask    = sigma == 0
-        wS = np.mean(welfare_pc[strict_mask]) if strict_mask.any() else float("nan")
-        wL = np.mean(welfare_pc[lax_mask])    if lax_mask.any()   else float("nan")
-        print(f"[eq. 3.22]  mean W/P:  strict={wS:.3f}   lax={wL:.3f}")
+    # ── validation moment accumulators ───────────────────────────────────────
+    _smask = sigma == 1
+    _lmask = sigma == 0
+    if _smask.any() and _lmask.any():
+        _ps_v = float(np.mean(p_star[_smask]))
+        _pl_v = float(np.mean(p_star[_lmask]))
+        if _pl_v > 0:
+            _val_price_gaps.append((_ps_v - _pl_v) / _pl_v * 100)
+    if period > _val_ss_thresh:
+        _imp_num = 0.0
+        _imp_den = 0.0
+        for _ii in range(N):
+            _p_ii = p_star[_ii]
+            _mc_Hd = p.c_H + p.t * sigma[_ii]
+            _imp_den += max(0.0, _p_ii - _mc_Hd) * P[_ii] / p.b * f_H[_ii]
+            _imp_den += max(0.0, _p_ii - p.c_L)  * P[_ii] / p.b * f_L[_ii]
+            for _jj in range(N):
+                if W[_ii, _jj] == 0 or _ii == _jj:
+                    continue
+                _w = W[_ii, _jj]
+                _bca = p.tau_BA if (sigma[_jj] == 0 and sigma[_ii] == 1) else 0.0
+                _mc_He = p.c_H + p.t * sigma[_jj] + p.c_trade + _bca
+                _mc_Le = p.c_L + p.c_trade
+                if _mc_He < _p_ii:
+                    _q = ((_p_ii - _mc_He) * P[_ii] / p.b) * (f_H[_jj] * _w)
+                    _imp_num += _q
+                    _imp_den += _q
+                if _mc_Le < _p_ii:
+                    _q = ((_p_ii - _mc_Le) * P[_ii] / p.b) * (f_L[_jj] * _w)
+                    _imp_num += _q
+                    _imp_den += _q
+        if _imp_den > 0:
+            _val_import_share.append(_imp_num / _imp_den * 100)
 
     # (iii) Relocation — eq. (3.17)
     old_loc  = firm_loc.copy()
-    firm_loc = relocate_firms(firm_loc, firm_type, sigma, pi_H, p, rng)
+    firm_loc = relocate_firms(firm_loc, firm_type, sigma, pi_H, p, rng, W)
     moved    = [(m, old_loc[m], firm_loc[m]) for m in range(M) if firm_loc[m] != old_loc[m]]
-
-    print(f"\n[eq. 3.17]  Relocations: {len(moved)}")
-    if VERBOSE and moved:
-        for m, src, dst in moved:
-            print(f"  firm {m} [H]  {JNAMES[src]}→{JNAMES[dst]}"
-                  f"   Δπ={pi_H[dst]-pi_H[src]:+.2f}")
     for m, src, dst in moved:
         rows_relocations.append({
             "period":            period,
@@ -186,16 +177,9 @@ for period in range(1, cfg.T + 1):
         })
 
     # (iv-a) Emission replicator — eq. (3.18)
-    # Profits are normalised by pi_ref so the Euler step is O(1) regardless of
-    # the absolute scale of profits (which depends on population size).
-    h_old  = float(np.mean(firm_type))
-    h_new  = emission_replicator(
-        h_old,
-        pi_H_bar / p.pi_ref,
-        pi_L_bar / p.pi_ref,
-        p.dt,
-    )
-    gap = h_new - h_old
+    h_old = float(np.mean(firm_type))
+    h_new = emission_replicator(h_old, pi_H_bar / p.pi_ref, pi_L_bar / p.pi_ref, p.dt)
+    gap   = h_new - h_old
     if abs(gap) > 0.5 / M:
         if gap > 0:
             idx = np.where(firm_type == 0)[0]
@@ -208,19 +192,15 @@ for period in range(1, cfg.T + 1):
             if n > 0:
                 firm_type[rng.choice(idx, n, replace=False)] = 0
     h_act = float(np.mean(firm_type))
-    arrow = "↑" if h_act > h_old else ("↓" if h_act < h_old else "→")
-    print(f"\n[eq. 3.18]  h: {h_old:.3f} {arrow} {h_act:.3f}"
-          f"   (π̄_H/π_ref={pi_H_bar/p.pi_ref:.3f}"
-          f"  π̄_L/π_ref={pi_L_bar/p.pi_ref:.3f})")
 
     # (iv-b) Policy replicator — eqs. (3.24)–(3.33)
     a_SS, a_SL, a_LS, a_LL = payoff_matrix(f_H, f_L, sigma, P, p_star, W, p)
-    b_SL   = network_correction(a_SS, a_SL, a_LS, a_LL, k_eff)
-    s_old  = float(np.mean(sigma))
-    s_new  = policy_replicator(s_old, a_SS, a_SL, a_LS, a_LL, b_SL, p.dt)
+    b_SL  = network_correction(a_SS, a_SL, a_LS, a_LL, k_eff)
+    s_old = float(np.mean(sigma))
+    s_new = policy_replicator(s_old, a_SS, a_SL, a_LS, a_LL, b_SL, p.dt)
 
-    gap_s     = s_new - s_old
-    n_change  = int(round(abs(gap_s) * N))
+    gap_s    = s_new - s_old
+    n_change = int(round(abs(gap_s) * N))
     policy_records = []
     if n_change > 0:
         if gap_s > 0:
@@ -246,14 +226,7 @@ for period in range(1, cfg.T + 1):
                     "s_before": round(s_old, 4), "s_after": round(s_new, 4),
                 })
     rows_policy.extend(policy_records)
-
     s_act = float(np.mean(sigma))
-    arrow_s = "↑" if s_act > s_old else ("↓" if s_act < s_old else "→")
-    print(f"[eq. 3.31]  s: {s_old:.3f} {arrow_s} {s_act:.3f}"
-          f"   b_SL={b_SL:.4f}   changes={len(policy_records)}")
-
-    f_H_end, f_L_end = count_firms(firm_loc, firm_type, N)
-    print(f"\nEnd:   {state_summary(sigma, f_H_end, f_L_end, firm_type)}")
 
     # ── per-jurisdiction records ──────────────────────────────────────────────
     for i in range(N):
@@ -294,9 +267,67 @@ for period in range(1, cfg.T + 1):
         "b_SL":             round(float(b_SL), 6),
     })
 
-print(f"\n{SEP}")
-print(f"  DONE  ({cfg.T} periods)")
-print(SEP)
+    _progress(period, cfg.T)
+
+print()  # newline after progress bar
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Validation report — empirical moment checks
+# ─────────────────────────────────────────────────────────────────────────────
+
+import pandas as pd
+
+_agg = pd.DataFrame(rows_aggregate)
+_jur = pd.DataFrame(rows_jurisdiction)
+_rel = pd.DataFrame(rows_relocations)
+
+# Use last 20% of periods as "steady state" window
+_ss_start = int(cfg.T * 0.8)
+_agg_ss   = _agg[_agg["period"] > _ss_start]
+_jur_ss   = _jur[_jur["period"] > _ss_start]
+_rel_ss   = _rel[_rel["period"] > _ss_start] if len(_rel) else _rel
+
+# 1. Carbon leakage rate
+#    Fraction of H-firms that relocated from strict → lax over the full run,
+#    relative to total H-firm-periods spent in strict jurisdictions.
+_strict_H_periods = _jur["f_H"][_jur["policy"] == "S"].sum()
+_n_relocations    = len(_rel)
+leakage_rate = (_n_relocations / _strict_H_periods * 100) if _strict_H_periods > 0 else 0.0
+
+# 2. Import penetration (quantity-weighted, steady state)
+#    Q_foreign / Q_total where Q = (p* - mc) * P/b per firm; accumulated in loop.
+import_penetration = float(np.mean(_val_import_share)) if _val_import_share else float("nan")
+
+# 3. Strict / lax price gap (all periods where both types coexist)
+#    Falls back gracefully when s collapses to 0 or 1 in steady state.
+price_gap_pct = float(np.mean(_val_price_gaps)) if _val_price_gaps else float("nan")
+
+# Targets
+_TARGET_LEAKAGE   = (5,  20)
+_TARGET_IMPORT    = (20, 40)
+_TARGET_PRICE_GAP = (10, 30)
+
+def _flag(val, lo, hi):
+    if lo <= val <= hi:
+        return "✓  in target range"
+    elif val < lo:
+        return f"↓  below target  (increase {'mu' if lo==5 else 'c_trade' if lo==20 else 't'})"
+    else:
+        return f"↑  above target  (decrease {'mu' if lo==5 else 'c_trade' if lo==20 else 't'})"
+
+SEP2 = "─" * 66
+print(f"\n{SEP2}")
+print(f"  VALIDATION REPORT")
+print(SEP2)
+print(f"  {'Moment':<35} {'Value':>8}   {'Target':>12}   Status")
+print(f"  {'-'*35} {'-'*8}   {'-'*12}   {'-'*22}")
+print(f"  {'Carbon leakage rate (%)':<35} {leakage_rate:>8.1f}   {'5 – 20 %':>12}   {_flag(leakage_rate, *_TARGET_LEAKAGE)}")
+print(f"  {'Import penetration (%)':<35} {import_penetration:>8.1f}   {'20 – 40 %':>12}   {_flag(import_penetration, *_TARGET_IMPORT)}")
+print(f"  {'Strict/lax price gap (%)':<35} {price_gap_pct:>8.1f}   {'10 – 30 %':>12}   {_flag(price_gap_pct, *_TARGET_PRICE_GAP)}")
+print(SEP2)
+print(f"  Steady-state window: periods {_ss_start+1}–{cfg.T}")
+print(f"  Final h = {_agg_ss['h'].mean():.3f}   final s = {_agg_ss['s'].mean():.3f}")
+print(SEP2)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Write CSVs
@@ -312,7 +343,7 @@ def write_csv(filename, rows, fieldnames):
         writer.writerows(rows)
     print(f"  saved  {path}  ({len(rows)} rows)")
 
-print(f"\nSaving CSVs to output/")
+print(f"Saving CSVs to output/")
 write_csv("aggregate.csv", rows_aggregate, [
     "period", "h", "s",
     "pi_H_bar", "pi_L_bar", "pi_H_bar_norm", "pi_L_bar_norm",
