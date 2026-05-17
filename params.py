@@ -1,7 +1,3 @@
-# ─────────────────────────────────────────────────────────────────────────────
-#  params.py  —  edit this file to configure the simulation
-# ─────────────────────────────────────────────────────────────────────────────
-
 import numpy as np
 
 # Simulation control
@@ -11,25 +7,26 @@ seed = 42    # random seed for reproducibility
 # Network
 N        = 50      # number of jurisdictions  (must be > k+1 for ring)
 k        = 4       # degree (ring: exact; ER / BA: mean degree)  (must be > 2)
-topology = "ring"  # "ring" | "er" | "ba"
+topology = "er"  # "ring" | "er" | "ba"
 
 # Goods market
 a   = 10.0   # demand intercept
 b   = 0.5    # slope of per-consumer demand
 c_H = 2.0    # marginal cost, high-emission firm
 c_L = 4.0    # marginal cost, low-emission firm
-t   = 5.0    # carbon tax rate (applied to H-firms in strict jurisdictions)
+t   = 6.0    # carbon tax rate (applied to H-firms in strict jurisdictions)
 
 # Trade and environment
-tau     = 2.0   # bilateral fiscal tariff rate (between strict and lax neighbours)
+tau     = 18.0  # bilateral fiscal tariff rate (between strict and lax neighbours)
 c_trade = 0.5   # per-unit transport / iceberg cost paid by any exporting firm
-tau_BA  = 0.0   # per-unit border carbon adjustment on lax→strict exports (set >0 to activate)
-delta   = 1.0   # environmental damage parameter
+tau_BA  = 2.5   # per-unit border carbon adjustment on lax→strict exports (set >0 to activate)
+delta   = 13.0  # environmental damage parameter
 F       = 0.5   # firm fixed cost per period
-w_bar   = 1.0   # wage scaling parameter
+w_bar   = 0.1   # reservation wage w̄  (§3.7)
+alpha   = 1.0   # labour productivity α (§3.3)
 
 # Dynamics
-mu  = 1.0   # firm mobility rate          (eq. 3.17)
+mu  = 1.2   # firm mobility rate          (eq. 3.17)
 lam = 2.0   # policy imitation rate       (eq. 3.31)
 dt  = 0.1   # time step size
 
@@ -38,7 +35,7 @@ M       = 500   # total number of firms
 s0      = 0.5   # initial fraction of strict jurisdictions
 h0      = 0.8   # initial fraction of high-emission firms
 mu_P    = 3.5   # log-normal population mean  (eq. 3.1)
-sigma_P = 1.5   # log-normal population std   (eq. 3.1)
+sigma_P = 0.5   # log-normal population std   (eq. 3.1)
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Generated initial conditions  (derived from the parameters above + seed)
@@ -52,12 +49,8 @@ _locs      = _rng0.integers(0, N, size=M)
 _types     = _rng0.random(M) < h0
 firms_init = [(_locs[m], "H" if _types[m] else "L") for m in range(M)]
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Params dataclass — used internally by model/ functions; no need to edit
-# ─────────────────────────────────────────────────────────────────────────────
 
 from dataclasses import dataclass
-
 
 @dataclass
 class Params:
@@ -71,22 +64,23 @@ class Params:
     c_L: float = 4.0
     F: float = 0.5
     # Policy
-    t: float = 5.0
+    t: float = 6.0
     # Goods market
     a: float = 10.0
     b: float = 0.5
     # Tariff / trade
-    tau: float = 2.0
-    c_trade: float = 1.0
+    tau: float = 18.0
+    c_trade: float = 0.5   # kept for backward-compat; not used in iceberg delivered cost
     tau_BA: float = 0.0
     # Population
-    mu_P: float = 7.0
-    sigma_P: float = 1.5
-    # Welfare
-    delta: float = 0.3
-    w_bar: float = 1.0
+    mu_P: float = 3.5
+    sigma_P: float = 0.5
+    # Welfare / labour
+    delta: float = 13.0
+    w_bar: float = 0.1     # reservation wage w̄ (§3.7 labour market)
+    alpha: float = 1.0     # labour productivity α (§3.3 mc_eff)
     # Dynamics
-    mu: float = 1.0
+    mu: float = 1.2
     lam: float = 0.5
     pi_ref: float = 1.0
     # Simulation

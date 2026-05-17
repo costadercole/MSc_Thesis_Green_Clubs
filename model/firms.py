@@ -64,41 +64,39 @@ def relocate_firms(
     W: np.ndarray = None,    # (N, N) weight matrix; if provided, restricts relocation to neighbours
 ) -> np.ndarray:
     """
-    Update firm_loc in-place for high-emission firms in strict jurisdictions.
+    Update firm_loc for high-emission firms based on profit incentives (eq. 3.17).
 
-    For each H-firm in strict jurisdiction i, find the best lax neighbour j
-    (highest pi_H among lax jurisdictions adjacent to i in W), compute the
-    relocation probability µ_ij (eq. 3.17), and move the firm with that
-    probability.  Restricting to neighbours prevents unrealistic global
-    teleportation and preserves the network structure.
+    For each H-firm in jurisdiction i, find the most profitable neighbouring
+    jurisdiction j (any policy type).  If pi_H[j] > pi_H[i], compute the
+    relocation probability µ_ij = µ · min(1, Δπ/π_ref) and move with
+    probability µ_ij · dt.  Leakage (strict→lax moves) emerges from profit
+    incentives rather than being hard-coded by policy type.
 
-    Falls back to the global best lax jurisdiction if W is None (backward compat).
+    Restricts to W-neighbours to prevent unrealistic global teleportation.
+    Falls back to all jurisdictions if W is None.
 
     Returns updated firm_loc.
     """
-    lax_jurisdictions = np.where(sigma == 0)[0]
-    if len(lax_jurisdictions) == 0:
+    h_firms = np.where(firm_type == 1)[0]
+    if len(h_firms) == 0:
         return firm_loc
 
-    h_in_strict = np.where((firm_type == 1) & (sigma[firm_loc] == 1))[0]
-    if len(h_in_strict) == 0:
-        return firm_loc
-
-    for idx in h_in_strict:
+    for idx in h_firms:
         i = firm_loc[idx]
 
-        # Candidate destinations: lax neighbours of jurisdiction i
+        # Candidate destinations: all neighbours of jurisdiction i
         if W is not None:
-            candidates = [j for j in lax_jurisdictions if W[i, j] > 0]
+            candidates = [j for j in range(len(sigma)) if W[i, j] > 0]
         else:
-            candidates = list(lax_jurisdictions)
+            candidates = [j for j in range(len(sigma)) if j != i]
 
         if not candidates:
             continue
 
         best_dest = candidates[int(np.argmax(pi_H[candidates]))]
-        delta_pi = pi_H[best_dest] - pi_H[i]
-        mu_ij = p.mu * min(1.0, max(0.0, delta_pi / p.pi_ref))
+        delta_pi  = pi_H[best_dest] - pi_H[i]
+        pi_origin = max(float(pi_H[i]), 1e-9)   # profit at origin = normaliser
+        mu_ij = p.mu * min(1.0, max(0.0, delta_pi / pi_origin))
         if mu_ij > 0 and rng.random() < mu_ij * p.dt:
             firm_loc[idx] = best_dest
 
