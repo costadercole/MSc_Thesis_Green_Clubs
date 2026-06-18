@@ -1,16 +1,14 @@
 """
-Goods-market equilibrium with Cournot competition and iceberg trade costs.
+Goods-market equilibrium with Cournot competition and additive transport costs.
 
 Equations implemented
 ---------------------
-mc_eff      : eq. (3.5)   w_j/α + c_e + t·σ_j
-c̃_{ji}     : eq. (3.11)  mc_eff/w_ij + τ·1[lax→strict] + τ_BA·1[H,lax→strict]
+mc_eff      : eq. (3.7)   c_H + t·σ_j  (if H),  c_L  (if L)
+c̃_{ji}     : eq. (3.21)  mc_eff + g·1[j≠i] + τ·1[lax→strict] + τ_BA·1[H,lax→strict]
 p*_i        : eq. (3.12)  (a + Σ_{j∈A_i} c̃_{ji}) / (|A_i| + 1)   [monotone elim.]
 q*_{ji}     : eq. (3.13)  (P_i/b)(p*_i − c̃_{ji})
-π_{ji}^var  : eq. (3.16)  (P_i/b)(p*_i − c̃_{ji})²   =  (b/P_i)·(q*_{ji})²
+π_{ji}^var  : eq. (3.16)  (b/P_i)·(q*_{ji})²
 π_j         : eq. (3.17)  Σ_i π_{ji}^var − F
-
-w_{ii} = 1 for domestic sales (no iceberg melt).
 """
 
 import numpy as np
@@ -18,26 +16,26 @@ from params import Params
 
 
 # ---------------------------------------------------------------------------
-# Delivered marginal cost — eq. (3.11)
+# Delivered marginal cost — eq. (3.21)
 # ---------------------------------------------------------------------------
 
-def _mc_eff(is_H: bool, sigma_j: int, w_j: float, p: Params) -> float:
-    """Effective mc at origin: w_j/α + c_e + t·σ_j·1[H]."""
-    return w_j / p.alpha + (p.c_H + p.t * sigma_j if is_H else p.c_L)
+def _mc_eff(is_H: bool, sigma_j: int, p: Params) -> float:
+    """Effective marginal cost at origin (no wage term)."""
+    return (p.c_H + p.t * sigma_j) if is_H else p.c_L
 
 
 def _delivered_cost(is_H: bool, j: int, i: int, sigma: np.ndarray,
-                    wages: np.ndarray, w_ij: float, p: Params) -> float:
+                    p: Params) -> float:
     """
     Delivered marginal cost of a firm of type is_H from j into market i.
 
-    Domestic (j == i):  w_{ii} = 1, no tariff/BCA.
-    Export    (j != i): divide mc_eff by w_ij; add τ and τ_BA if lax→strict.
+    Domestic (j == i): mc_eff only.
+    Export    (j != i): add additive transport cost g; add τ and τ_BA if lax→strict.
     """
-    mc = _mc_eff(is_H, int(sigma[j]), float(wages[j]), p)
+    mc = _mc_eff(is_H, int(sigma[j]), p)
     if j == i:
         return mc
-    cost = mc / w_ij
+    cost = mc + p.g
     if sigma[j] == 0 and sigma[i] == 1:   # lax origin → strict destination
         cost += p.tau
         if is_H:
@@ -85,7 +83,7 @@ def _cournot_solve(
 
 
 # ---------------------------------------------------------------------------
-# Full market solve — eqs. (3.11)–(3.13)
+# Full market solve — eqs. (3.21), (3.12)–(3.13)
 # ---------------------------------------------------------------------------
 
 def solve_market(
@@ -93,22 +91,21 @@ def solve_market(
     f_L: np.ndarray,    # (N,) L-firm counts per jurisdiction
     sigma: np.ndarray,  # (N,) 1=strict, 0=lax
     P: np.ndarray,      # (N,) populations
-    W: np.ndarray,      # (N, N) row-stochastic weight matrix
-    wages: np.ndarray,  # (N,) current wages
+    W: np.ndarray,      # (N, N) row-stochastic weight matrix (used for neighbour detection only)
     p: Params,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Cournot equilibrium with iceberg transport costs (eqs. 3.11–3.13).
+    Cournot equilibrium with additive transport costs (eqs. 3.21, 3.12–3.13).
 
     For each destination market i:
-      1. Collect domestic firms (w_{ii}=1) and neighbors j with W[i,j]>0.
-      2. Compute delivered costs c̃_{H,ji} and c̃_{L,ji}.
+      1. Collect domestic firms and neighbors j with W[i,j]>0.
+      2. Compute delivered costs c̃_{ji} (additive g, tariff, BCA).
       3. Run monotone elimination → p*_i.
       4. Compute q*_{ji} = (P_i/b)(p*_i − c̃_{ji}) for active (j, type) pairs.
 
     Returns
     -------
-    p_star : (N,)    trade-adjusted equilibrium price per jurisdiction.
+    p_star : (N,)    equilibrium price per jurisdiction.
     q_H    : (N, N)  per-H-firm delivered quantity from j to market i  (q_H[i, j]).
     q_L    : (N, N)  per-L-firm delivered quantity from j to market i  (q_L[i, j]).
     """
@@ -119,26 +116,24 @@ def solve_market(
 
     for i in range(N):
         P_i = max(float(P[i]), 1.0)
-        b_ov_P = p.b / P_i          # used to invert q back to (p-mc)
 
         # Build candidate list: (delivered_cost, firm_count, is_H, source_j)
         cands = []
 
-        # Domestic firms (j == i, w_{ii} = 1)
+        # Domestic firms (j == i)
         if f_H[i] > 0:
-            cands.append((_delivered_cost(True,  i, i, sigma, wages, 1.0, p), float(f_H[i]), True,  i))
+            cands.append((_delivered_cost(True,  i, i, sigma, p), float(f_H[i]), True,  i))
         if f_L[i] > 0:
-            cands.append((_delivered_cost(False, i, i, sigma, wages, 1.0, p), float(f_L[i]), False, i))
+            cands.append((_delivered_cost(False, i, i, sigma, p), float(f_L[i]), False, i))
 
         # Neighboring exporters
         for j in range(N):
             if W[i, j] == 0 or i == j:
                 continue
-            w_ij = float(W[i, j])
             if f_H[j] > 0:
-                cands.append((_delivered_cost(True,  j, i, sigma, wages, w_ij, p), float(f_H[j]), True,  j))
+                cands.append((_delivered_cost(True,  j, i, sigma, p), float(f_H[j]), True,  j))
             if f_L[j] > 0:
-                cands.append((_delivered_cost(False, j, i, sigma, wages, w_ij, p), float(f_L[j]), False, j))
+                cands.append((_delivered_cost(False, j, i, sigma, p), float(f_L[j]), False, j))
 
         if not cands:
             continue
@@ -161,7 +156,7 @@ def solve_market(
 
 
 # ---------------------------------------------------------------------------
-# Firm profits — eq. (3.17)
+# Firm profits — eq. (3.16)–(3.17)
 # ---------------------------------------------------------------------------
 
 def firm_variable_profits(
@@ -173,23 +168,18 @@ def firm_variable_profits(
     """
     Per-firm variable profit summed across all active markets (eq. 3.17).
 
-    π_{ji}^var = (P_i/b)(p*_i − c̃_{ji})² = (b/P_i)·(q*_{ji})²
+    π_{ji}^var = (b/P_i)·q*_{ji}²
 
-    π_H[j] = Σ_i (b/P_i)·q_H[i,j]²   [variable only; subtract F for total]
+    π_H[j] = Σ_i (b/P_i)·q_H[i,j]²
     π_L[j] = Σ_i (b/P_i)·q_L[i,j]²
 
     Returns (pi_H, pi_L), each shape (N,).
     """
     P_safe = np.maximum(P, 1.0)
-    # (b/P_i) weight vector, shape (N,)
-    w = p.b / P_safe                        # (N,)
+    w = p.b / P_safe          # (N,)
 
-    # pi_H[j] = Σ_i w[i] * q_H[i,j]^2
-    pi_H = (q_H ** 2) * w[:, None]          # (N, N): row i × col j
-    pi_H = pi_H.sum(axis=0)                 # (N,) sum over destination i
-
-    pi_L = (q_L ** 2) * w[:, None]
-    pi_L = pi_L.sum(axis=0)
+    pi_H = ((q_H ** 2) * w[:, None]).sum(axis=0)
+    pi_L = ((q_L ** 2) * w[:, None]).sum(axis=0)
 
     return pi_H, pi_L
 
@@ -199,10 +189,14 @@ def firm_variable_profits(
 # ---------------------------------------------------------------------------
 
 def consumer_surplus(p_star: np.ndarray, a: float, b: float) -> np.ndarray:
-    """Per-consumer surplus in each jurisdiction (eq. 3.20)."""
+    """Per-consumer surplus in each jurisdiction."""
     return (a - p_star) ** 2 / (2 * b)
 
 
-def environmental_damage(f_H: np.ndarray, P: np.ndarray, delta: float) -> np.ndarray:
-    """Per-capita environmental damage (eq. 3.21)."""
-    return delta * f_H / np.maximum(P, 1)
+def environmental_damage(
+    f_H: np.ndarray, P: np.ndarray,
+    delta_loc: float, delta_glob: float,
+) -> np.ndarray:
+    """Per-capita environmental damage (local + global components)."""
+    P_safe = np.maximum(P, 1.0)
+    return delta_loc * f_H / P_safe + delta_glob * f_H.sum() / P_safe.sum()

@@ -88,7 +88,7 @@ def run(p: Params) -> dict:
         # (iv-b) policy replicator → update sigma
         a_SS, a_SL, a_LS, a_LL = payoff_matrix(f_H, f_L, sigma, P, p_star, W, p)
         b_SL = network_correction(a_SS, a_SL, a_LS, a_LL, k_eff)
-        s = policy_replicator(s, a_SS, a_SL, a_LS, a_LL, b_SL, p.dt)
+        s = policy_replicator(s, a_SS, a_SL, a_LS, a_LL, b_SL, p.dt, p.kappa, p.lam)
         _apply_s(sigma, s, rng)
 
         # Record

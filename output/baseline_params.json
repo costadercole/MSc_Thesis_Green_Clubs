@@ -1,0 +1,52 @@
+{
+  "a": 20.0,
+  "b": 1.0,
+  "c_H": 4.0,
+  "c_L": 6.0,
+  "delta_c": 2.0,
+  "t": 9.0,
+  "t_over_dc": 4.5,
+  "g": 2.4,
+  "tau": 3.0,
+  "tau_BA": 5,
+  "F": 0.0,
+  "mu_P": 7.0,
+  "sigma_P": 1.5,
+  "N": 50,
+  "M": 500,
+  "k": 3,
+  "topology": "er",
+  "h0": 0.5,
+  "_moment_table": {
+    "leakage_pct": {
+      "target": [
+        5,
+        20
+      ],
+      "achieved": 5.76,
+      "std": 3.4,
+      "in_band": true,
+      "dialed_by": "mu (relocation rate), t, delta_c"
+    },
+    "import_pen_pct": {
+      "target": [
+        8,
+        12
+      ],
+      "achieved": 9.39,
+      "std": 4.12,
+      "in_band": true,
+      "dialed_by": "g (transport cost)"
+    },
+    "price_cv_pct": {
+      "target": [
+        10,
+        30
+      ],
+      "achieved": 16.17,
+      "std": 1.78,
+      "in_band": true,
+      "dialed_by": "sigma_P (population spread), policy heterogeneity"
+    }
+  }
+}

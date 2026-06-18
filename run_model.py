@@ -10,8 +10,7 @@ import numpy as np
 import params as cfg
 from params import Params
 from model.network import build_network, effective_degree
-from model.market import firm_variable_profits
-from model.labour import solve_wages
+from model.market import solve_market, firm_variable_profits
 from model.firms import count_firms, relocate_firms, emission_replicator, average_profits
 from model.jurisdictions import (
     fiscal_revenues, per_capita_welfare, payoff_matrix,
@@ -37,9 +36,10 @@ k_eff = effective_degree(G)
 p = Params(
     N=N, M=M, k=cfg.k, topology=cfg.topology,
     a=cfg.a, b=cfg.b, c_H=cfg.c_H, c_L=cfg.c_L, t=cfg.t,
-    tau=cfg.tau, c_trade=cfg.c_trade, tau_BA=cfg.tau_BA,
-    delta=cfg.delta, F=cfg.F, w_bar=cfg.w_bar, alpha=cfg.alpha,
-    mu=cfg.mu, lam=cfg.lam,
+    tau=cfg.tau, g=cfg.g, tau_BA=cfg.tau_BA,
+    delta_loc=cfg.delta_loc, delta_glob=cfg.delta_glob, F=cfg.F,
+    mu=cfg.mu, lam=cfg.lam, kappa=cfg.kappa,
+    relocate=cfg.relocate,
     dt=cfg.dt, T=cfg.T, seed=cfg.seed,
     mu_P=cfg.mu_P, sigma_P=cfg.sigma_P,
     s0=float(np.mean(sigma)),
@@ -76,13 +76,13 @@ def _progress(period, total, width=40):
 
 for period in range(1, cfg.T + 1):
 
-    # (i) Wages and goods-market equilibrium — §3.4, §3.7
+    # (i) Goods-market equilibrium — eqs. (3.21), (3.12)–(3.13)
     f_H, f_L = count_firms(firm_loc, firm_type, N)
-    wages, p_star, q_H, q_L = solve_wages(f_H, f_L, sigma, P, W, p)
+    p_star, q_H, q_L = solve_market(f_H, f_L, sigma, P, W, p)
 
-    # (ii) Fiscal revenues and per-capita welfare — eqs. (3.22)–(3.26)
+    # (ii) Fiscal revenues and per-capita welfare — eqs. (3.22)–(3.24), (3.40)
     TR         = fiscal_revenues(f_H, f_L, sigma, W, q_H, q_L, p)
-    welfare_pc = per_capita_welfare(f_H, sigma, P, p_star, wages, TR, p)
+    welfare_pc = per_capita_welfare(f_H, sigma, P, p_star, TR, p)
 
     # (iii) Firm profits — eqs. (3.16)–(3.17)
     pi_H, pi_L         = firm_variable_profits(q_H, q_L, P, p)
@@ -109,7 +109,7 @@ for period in range(1, cfg.T + 1):
         if _imp_den > 0:
             _val_import_share.append(_imp_num / _imp_den * 100)
 
-    # (iv) Relocation — eq. (3.17)
+    # (iv) Relocation — eq. (3.17); disabled when p.relocate = False
     old_loc  = firm_loc.copy()
     firm_loc = relocate_firms(firm_loc, firm_type, sigma, pi_H, p, rng, W)
     moved    = [(m, old_loc[m], firm_loc[m]) for m in range(M) if firm_loc[m] != old_loc[m]]
@@ -142,11 +142,11 @@ for period in range(1, cfg.T + 1):
                 firm_type[rng.choice(idx, n, replace=False)] = 0
     h_act = float(np.mean(firm_type))
 
-    # (v-b) Policy replicator — eqs. (3.28)–(3.34)
-    a_SS, a_SL, a_LS, a_LL = payoff_matrix(f_H, f_L, sigma, P, p_star, W, wages, q_H, q_L, p)
+    # (v-b) Policy replicator — eqs. (3.51), (3.53)
+    a_SS, a_SL, a_LS, a_LL = payoff_matrix(f_H, f_L, sigma, P, p_star, W, q_H, q_L, p)
     b_SL  = network_correction(a_SS, a_SL, a_LS, a_LL, k_eff)
     s_old = float(np.mean(sigma))
-    s_new = policy_replicator(s_old, a_SS, a_SL, a_LS, a_LL, b_SL, p.dt)
+    s_new = policy_replicator(s_old, a_SS, a_SL, a_LS, a_LL, b_SL, p.dt, p.kappa, p.lam)
 
     gap_s    = s_new - s_old
     n_change = int(round(abs(gap_s) * N))
@@ -180,13 +180,13 @@ for period in range(1, cfg.T + 1):
     # ── per-jurisdiction records ──────────────────────────────────────────────
     P_safe = np.maximum(P, 1.0)
     for i in range(N):
-        # total imports into market i
         f_imported_i = sum(
             f_H[j] * float(q_H[i, j]) + f_L[j] * float(q_L[i, j])
             for j in range(N) if j != i and W[i, j] > 0
         )
         cs_i     = (p.a - float(p_star[i])) ** 2 / (2 * p.b)
-        damage_i = p.delta * float(f_H[i]) / float(P_safe[i])
+        damage_i = (p.delta_loc  * float(f_H[i]) / float(P_safe[i])
+                  + p.delta_glob * float(f_H.sum()) / float(P_safe.sum()))
         rows_jurisdiction.append({
             "period":        period,
             "jurisdiction":  JNAMES[i],
@@ -197,7 +197,6 @@ for period in range(1, cfg.T + 1):
             "f_total":       int(f_H[i] + f_L[i]),
             "f_imported":    round(f_imported_i, 4),
             "price":         round(float(p_star[i]), 4),
-            "wage":          round(float(wages[i]), 6),
             "pi_H":          round(float(pi_H[i]), 4),
             "pi_L":          round(float(pi_L[i]), 4),
             "TR":            round(float(TR[i]), 4),
@@ -214,7 +213,6 @@ for period in range(1, cfg.T + 1):
         "pi_H_bar":         round(float(pi_H_bar), 4),
         "pi_L_bar":         round(float(pi_L_bar), 4),
         "mean_price":       round(float(np.mean(p_star)), 4),
-        "mean_wage":        round(float(np.mean(wages)), 6),
         "mean_welfare":     round(float(np.mean(welfare_pc)), 6),
         "n_relocations":    len(moved),
         "n_policy_changes": len(policy_records),
@@ -252,16 +250,16 @@ import_penetration = float(np.mean(_val_import_share)) if _val_import_share else
 price_gap_pct = float(np.mean(_val_price_gaps)) if _val_price_gaps else float("nan")
 
 _TARGET_LEAKAGE   = (5,  20)
-_TARGET_IMPORT    = (20, 40)
+_TARGET_IMPORT    = (8,  10)
 _TARGET_PRICE_GAP = (10, 30)
 
 def _flag(val, lo, hi):
     if lo <= val <= hi:
         return "✓  in target range"
     elif val < lo:
-        return f"↓  below target  (increase {'mu' if lo==5 else 'c_trade' if lo==20 else 't'})"
+        return f"↓  below target"
     else:
-        return f"↑  above target  (decrease {'mu' if lo==5 else 'c_trade' if lo==20 else 't'})"
+        return f"↑  above target"
 
 SEP2 = "─" * 66
 print(f"\n{SEP2}")
@@ -270,7 +268,7 @@ print(SEP2)
 print(f"  {'Moment':<35} {'Value':>8}   {'Target':>12}   Status")
 print(f"  {'-'*35} {'-'*8}   {'-'*12}   {'-'*22}")
 print(f"  {'Carbon leakage rate (%)':<35} {leakage_rate:>8.1f}   {'5 – 20 %':>12}   {_flag(leakage_rate, *_TARGET_LEAKAGE)}")
-print(f"  {'Import penetration (%)':<35} {import_penetration:>8.1f}   {'20 – 40 %':>12}   {_flag(import_penetration, *_TARGET_IMPORT)}")
+print(f"  {'Import penetration (%)':<35} {import_penetration:>8.1f}   {'8 – 10 %':>12}   {_flag(import_penetration, *_TARGET_IMPORT)}")
 print(f"  {'Strict/lax price gap (%)':<35} {price_gap_pct:>8.1f}   {'10 – 30 %':>12}   {_flag(price_gap_pct, *_TARGET_PRICE_GAP)}")
 print(SEP2)
 print(f"  Steady-state window: periods {_ss_start+1}–{cfg.T}")
@@ -295,13 +293,13 @@ print(f"Saving CSVs to output/")
 write_csv("aggregate.csv", rows_aggregate, [
     "period", "h", "s",
     "pi_H_bar", "pi_L_bar",
-    "mean_price", "mean_wage", "mean_welfare",
+    "mean_price", "mean_welfare",
     "n_relocations", "n_policy_changes", "b_SL",
 ])
 write_csv("jurisdiction.csv", rows_jurisdiction, [
     "period", "jurisdiction", "policy", "population",
     "f_H", "f_L", "f_total", "f_imported", "price",
-    "wage", "pi_H", "pi_L", "TR",
+    "pi_H", "pi_L", "TR",
     "cs_pc", "damage_pc", "welfare_pc",
 ])
 write_csv("relocations.csv", rows_relocations, [
