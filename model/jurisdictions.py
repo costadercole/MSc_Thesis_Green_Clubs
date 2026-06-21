@@ -1,34 +1,27 @@
 """
-Jurisdiction state and dynamics.
+Jurisdiction state and dynamics — §3.3, §3.7, §3.8.
 
 State
 -----
 sigma : (N,) int  — regulatory policy: 1 = strict (S), 0 = lax (L)
 
-Fiscal revenues (eqs. 3.22–3.24)
+Fiscal revenues (eqs. 3.29–3.32)
 ---------------------------------
-TR_i^tax     = t·1[S]·f_H[i]·Σ_m q_H[m,i]          (carbon tax on total H-output in i)
-TR_i^tariff  = τ·1[S]·Σ_{ℓ lax nbr} (f_H[ℓ]·q_H[i,ℓ] + f_L[ℓ]·q_L[i,ℓ])
-TR_i^BCA     = τ_BA·1[S]·Σ_{ℓ lax nbr} f_H[ℓ]·q_H[i,ℓ]
+TR_i^tax     = t · 1[S] · Σ_{m} f_H[i] · q_H[m, i]
+TR_i^tariff  = τ · 1[S] · Σ_{ℓ lax nbr} (f_H[ℓ]·q_H[i,ℓ] + f_L[ℓ]·q_L[i,ℓ])
+TR_i^BCA     = τ_BA · 1[S] · Σ_{ℓ lax nbr} f_H[ℓ]·q_H[i,ℓ]
 
 Per-capita welfare (eq. 3.40):
 W_i/P_i = (a−p*_i)²/(2b) + TR_i/P_i − D_i
 where D_i = δ_loc·f_H[i]/P_i + δ_glob·(Σ_j f_H[j])/(Σ_j P_j)
 
-Payoff matrix (eqs. 3.43–3.47):
-a_SS = W_S^base + t·Q̄^prod_{H,S}/P̄_S
-a_SL = a_SS + τ·q̄^imp_{S←L}/P̄_S + τ_BA·q̄^{H,imp}_{S←L}/P̄_S
-a_LS = W_L^base − Φ^exp_{L→S}      (export-side penalty, eq. 3.47)
-a_LL = W_L^base
-where W_X^base = cs_X − δ_loc·f̄^H_X/P̄_X − δ_glob·f̄^H_total/P̄_total
-
-Policy dynamics (eqs. 3.51, 3.53):
-b_SL = (a_SS + a_SL − a_LS − a_LL) / (k−2)   [pairwise comparison]
-ṡ = s(1−s)·tanh[κ/2·(Π̃_S − Π̃_L)]           [Fermi replicator]
+Policy dynamics (eq. 3.41):
+Each jurisdiction i samples one neighbour j ~ N(i) with prob λ·Δt and
+switches σ_i ← σ_j with Fermi probability 1 / (1 + exp(-κ(W_j/P_j − W_i/P_i))).
 """
 
-import copy
 import numpy as np
+from scipy.special import expit
 from params import Params
 
 
@@ -45,7 +38,7 @@ def init_populations(p: Params, rng: np.random.Generator) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# Fiscal revenues — eqs. (3.22)–(3.24)
+# Fiscal revenues — eqs. (3.29)–(3.32)
 # ---------------------------------------------------------------------------
 
 def fiscal_revenues(
@@ -53,16 +46,11 @@ def fiscal_revenues(
     f_L: np.ndarray,    # (N,)
     sigma: np.ndarray,  # (N,)
     W: np.ndarray,      # (N, N) neighbour weight matrix
-    q_H: np.ndarray,    # (N, N) per-H-firm delivered qty from j to i
-    q_L: np.ndarray,    # (N, N) per-L-firm delivered qty from j to i
+    q_H: np.ndarray,    # (N, N) per-H-firm delivered qty from j to i  (q_H[i, j])
+    q_L: np.ndarray,    # (N, N) per-L-firm delivered qty from j to i  (q_L[i, j])
     p: Params,
 ) -> np.ndarray:
-    """
-    Total fiscal revenue TR_i for each jurisdiction (eq. 3.24).
-
-    With additive transport costs (no iceberg melt), quantity produced at
-    origin j for market i equals q_H[i, j] exactly, so no iceberg correction.
-    """
+    """Total fiscal revenue TR_i for each jurisdiction (eq. 3.32)."""
     N  = len(f_H)
     TR = np.zeros(N)
 
@@ -70,11 +58,12 @@ def fiscal_revenues(
         if sigma[i] == 0:
             continue   # lax: no direct fiscal revenue
 
-        # Carbon-tax revenue (eq. 3.22): t · f_H[i] · total H-output from i
-        total_H_output_i = sum(float(q_H[m, i]) for m in range(N))
+        # Carbon-tax revenue (eq. 3.29): t · f_H[i] · total H-output from i
+        # Total H output from i = sum over all destination markets m of q_H[m, i]
+        total_H_output_i = float(q_H[:, i].sum())
         TR[i] += p.t * f_H[i] * total_H_output_i
 
-        # Tariff + BCA revenue (eqs. 3.23–3.24): charged on lax-neighbour imports
+        # Tariff + BCA revenue (eqs. 3.30–3.31): charged on lax-neighbour imports
         for ell in range(N):
             if W[i, ell] == 0 or ell == i:
                 continue
@@ -99,197 +88,96 @@ def per_capita_welfare(
     p_star: np.ndarray,
     TR: np.ndarray,
     p: Params,
+    q_H: np.ndarray = None,   # (N, N) per-H-firm delivered qty; if provided, damage ∝ total output
+    f_L: np.ndarray = None,   # (N,) L-firm counts; needed for the host-benefit term
+    q_L: np.ndarray = None,   # (N, N) per-L-firm delivered qty; needed for the host-benefit term
 ) -> np.ndarray:
     """
-    Per-capita welfare W_i/P_i (eq. 3.40).
+    Per-capita welfare W_i/P_i (eq. 3.40, extended with a host-benefit channel).
 
-    = (a−p*_i)²/(2b)  +  TR_i/P_i  −  D_i
-    D_i = δ_loc·f_H[i]/P_i + δ_glob·(Σ f_H)/(Σ P)
+    = (a−p*_i)²/(2b)  +  TR_i/P_i  +  B_i  −  D_i
+    B_i = φ·(E_H[i] + E_L[i]) / P_i          (host benefit: jobs + tax base)
+    D_i = δ_loc·E_H[i]/P_i + δ_glob·(Σ E_H)/(Σ P)
+
+    where E_X[i] = f_X[i] · Σ_m q_X[m,i] is total type-X output produced in i.
+    If q_H is not supplied, E_H[i] = f_H[i] (firm-count fallback).
+
+    Host-benefit term (φ ≥ 0)
+    -------------------------
+    Reduced-form value that a jurisdiction retains from production physically
+    located in it — employment/wages, general (non-carbon) tax base, and local
+    profit/agglomeration.  Accrues under BOTH policies (it is not an
+    environmental instrument), proportional to local output.  This is the
+    economic upside that makes hosting industry — including dirty H-firms —
+    attractive, so that going strict means losing that activity (and, once
+    firms are mobile, losing it to lax neighbours).
+
+    The net per-unit payoff of hosting an H-firm's output is (φ − δ_loc):
+      φ < δ_loc → damage dominates → strict preferred (green club)
+      φ > δ_loc → jobs/tax dominate → lax preferred (pollution haven)
+    φ = 0 recovers the original damage-only welfare.
     """
-    P_safe      = np.maximum(P, 1.0)
-    cs          = (p.a - p_star) ** 2 / (2 * p.b)
-    fiscal      = TR / P_safe
-    local_dmg   = p.delta_loc  * f_H / P_safe
-    global_dmg  = p.delta_glob * f_H.sum() / P_safe.sum()   # scalar, same for all i
-    return cs + fiscal - local_dmg - global_dmg
-
-
-# ---------------------------------------------------------------------------
-# Export-side penalty — eq. (3.47)
-# ---------------------------------------------------------------------------
-
-def _export_side_penalty(
-    f_H: np.ndarray,
-    f_L: np.ndarray,
-    sigma: np.ndarray,
-    P: np.ndarray,
-    W: np.ndarray,
-    pi_H_current: np.ndarray,   # (N,) H-firm variable profit under current tariffs
-    p: Params,
-) -> float:
-    """
-    Φ^exp_{L→S}: per-capita profit loss for H-firms in lax jurisdictions
-    due to tariffs imposed by strict neighbours (eq. 3.47).
-
-    Computed as mean over lax jurisdictions of:
-        f_H[j] * (pi_H_notariff[j] - pi_H_current[j]) / P[j]
-
-    where pi_H_notariff is H-firm profits with τ=0 and τ_BA=0.
-    """
-    from model.market import solve_market, firm_variable_profits
-
-    lax_mask = sigma == 0
-    if not lax_mask.any():
-        return 0.0
-
-    # Counterfactual: remove tariff and BCA
-    p0 = copy.copy(p)
-    p0.tau    = 0.0
-    p0.tau_BA = 0.0
-    _, q_H_0, q_L_0 = solve_market(f_H, f_L, sigma, P, W, p0)
-    pi_H_0, _ = firm_variable_profits(q_H_0, q_L_0, P, p0)
-
     P_safe = np.maximum(P, 1.0)
-    phi_vals = [
-        f_H[j] * float(pi_H_0[j] - pi_H_current[j]) / float(P_safe[j])
-        for j in range(len(sigma)) if sigma[j] == 0
-    ]
-    return float(np.mean(phi_vals)) if phi_vals else 0.0
+    cs     = (p.a - p_star) ** 2 / (2 * p.b)
+    fiscal = TR / P_safe
+
+    if q_H is not None:
+        # Total H-firm output per jurisdiction: f_H[i] * (sum of per-firm supply across all markets)
+        E_H = f_H * q_H.sum(axis=0)   # q_H[m, i].sum(axis=0) = total per-firm supply from i
+    else:
+        E_H = f_H
+
+    # Host benefit: jobs + tax base from ALL local production (H and L), under any policy.
+    phi = getattr(p, "phi", 0.0)
+    if phi != 0.0 and q_L is not None and f_L is not None:
+        E_L     = f_L * q_L.sum(axis=0)
+        benefit = phi * (E_H + E_L) / P_safe
+    else:
+        benefit = 0.0
+
+    local_dmg  = p.delta_loc  * E_H / P_safe
+    global_dmg = p.delta_glob * E_H.sum() / P_safe.sum()
+    return cs + fiscal + benefit - local_dmg - global_dmg
 
 
 # ---------------------------------------------------------------------------
-# Payoff matrix — eqs. (3.43)–(3.47)
+# Agent-level Fermi policy update — eq. (3.41)
 # ---------------------------------------------------------------------------
 
-def payoff_matrix(
-    f_H: np.ndarray,
-    f_L: np.ndarray,
-    sigma: np.ndarray,
-    P: np.ndarray,
-    p_star: np.ndarray,
-    W: np.ndarray,
-    q_H: np.ndarray,
-    q_L: np.ndarray,
+def fermi_policy_update(
+    sigma: np.ndarray,   # (N,) current policies, modified in-place
+    welfare: np.ndarray, # (N,) per-capita welfare W_i/P_i
+    W: np.ndarray,       # (N, N) network weight matrix (non-zero = neighbour)
     p: Params,
-) -> tuple[float, float, float, float]:
+    rng: np.random.Generator,
+) -> np.ndarray:
     """
-    2×2 payoff matrix (a_SS, a_SL, a_LS, a_LL).
+    Each jurisdiction i, with probability λ·Δt, samples one neighbour j ~ N(i)
+    uniformly at random and switches σ_i ← σ_j with Fermi probability
 
-    a_SS = W_S^base + t · Q̄^prod_{H,S} / P̄_S
-    a_SL = a_SS    + τ · q̄^imp_{S←L}  / P̄_S + τ_BA · q̄^{H,imp}_{S←L} / P̄_S
-    a_LS = W_L^base − Φ^exp_{L→S}
-    a_LL = W_L^base
+        P(σ_i ← σ_j) = 1 / (1 + exp(-κ (W_j/P_j − W_i/P_i)))   (eq. 3.41)
+
+    Updates are synchronous: all switching decisions use the welfare vector
+    computed before any switches this step.
     """
-    from model.market import firm_variable_profits
+    sigma_new = sigma.copy()
+    N = len(sigma)
 
-    strict_mask = sigma == 1
-    lax_mask    = sigma == 0
-
-    def _mean(arr, mask):
-        return float(np.mean(arr[mask])) if mask.any() else 0.0
-
-    P_safe = np.maximum(P, 1.0)
-
-    p_S  = _mean(p_star, strict_mask)
-    p_L  = _mean(p_star, lax_mask)
-    fH_S = _mean(f_H,    strict_mask)
-    fH_L = _mean(f_H,    lax_mask)
-    P_S  = _mean(P,      strict_mask)
-    P_L  = _mean(P,      lax_mask)
-
-    inv_PS = 1.0 / max(P_S, 1e-9)
-    inv_PL = 1.0 / max(P_L, 1e-9)
-
-    # Global damage component — same for all jurisdictions (cancels in S−L gap,
-    # but kept for absolute welfare levels used in the replicator)
-    P_safe      = np.maximum(P, 1.0)
-    glob_damage = p.delta_glob * f_H.sum() / P_safe.sum()
-
-    # Base welfare terms (eq. 3.43–3.44): CS − local damage − global damage
-    cs_S  = (p.a - p_S) ** 2 / (2 * p.b)
-    cs_L  = (p.a - p_L) ** 2 / (2 * p.b)
-
-    W_S_base = cs_S - p.delta_loc * fH_S * inv_PS - glob_damage
-    W_L_base = cs_L - p.delta_loc * fH_L * inv_PL - glob_damage
-
-    # Carbon-tax revenue averaged over strict jurisdictions (eq. 3.45)
-    N = len(f_H)
-    prod_vals = []
     for i in range(N):
-        if sigma[i] != 1:
+        # Each jurisdiction has an independent update event with prob λ·Δt
+        if rng.random() >= p.lam * p.dt:
             continue
-        total_H_output_i = sum(float(q_H[m, i]) for m in range(N))
-        prod_vals.append(f_H[i] * total_H_output_i)
-    Q_prod_HS = float(np.mean(prod_vals)) if prod_vals else 0.0
 
-    # Import quantities from lax neighbors into strict jurisdictions (eq. 3.46)
-    imp_all   = []
-    imp_H_all = []
-    for i in range(N):
-        if sigma[i] != 1:
+        # Sample one neighbour j from N(i) (non-zero weight, excluding self)
+        neighbours = [j for j in range(N) if W[i, j] > 0 and j != i]
+        if not neighbours:
             continue
-        for ell in range(N):
-            if W[i, ell] == 0 or ell == i:
-                continue
-            if sigma[ell] != 0:
-                continue
-            imp   = f_H[ell] * float(q_H[i, ell]) + f_L[ell] * float(q_L[i, ell])
-            imp_H = f_H[ell] * float(q_H[i, ell])
-            imp_all.append(imp)
-            imp_H_all.append(imp_H)
-    q_imp_SL   = float(np.mean(imp_all))   if imp_all   else 0.0
-    q_H_imp_SL = float(np.mean(imp_H_all)) if imp_H_all else 0.0
+        j = neighbours[rng.integers(len(neighbours))]
 
-    # Export-side penalty for lax jurisdictions (eq. 3.47)
-    pi_H_curr, _ = firm_variable_profits(q_H, q_L, P, p)
-    phi_exp = _export_side_penalty(f_H, f_L, sigma, P, W, pi_H_curr, p)
+        # Fermi switching probability (expit is stable for large |delta_W|)
+        delta_W = welfare[j] - welfare[i]
+        prob    = float(expit(p.kappa * delta_W))
+        if rng.random() < prob:
+            sigma_new[i] = sigma[j]
 
-    # Payoff entries
-    a_SS = W_S_base + p.t * Q_prod_HS * inv_PS
-    a_SL = a_SS     + p.tau * q_imp_SL * inv_PS + p.tau_BA * q_H_imp_SL * inv_PS
-    a_LS = W_L_base - phi_exp
-    a_LL = W_L_base
-
-    return a_SS, a_SL, a_LS, a_LL
-
-
-# ---------------------------------------------------------------------------
-# Network correction — eq. (3.51)  pairwise comparison
-# ---------------------------------------------------------------------------
-
-def network_correction(
-    a_SS: float, a_SL: float, a_LS: float, a_LL: float,
-    k: float,
-) -> float:
-    """b_SL for pairwise-comparison imitation (eq. 3.51)."""
-    if k <= 2:
-        return 0.0
-    return float((a_SS + a_SL - a_LS - a_LL) / (k - 2))
-
-
-# ---------------------------------------------------------------------------
-# Policy replicator — eq. (3.53)  Fermi rule
-# ---------------------------------------------------------------------------
-
-def policy_replicator(
-    s: float,
-    a_SS: float, a_SL: float, a_LS: float, a_LL: float,
-    b_SL: float,
-    dt: float,
-    kappa: float,
-    lam: float = 1.0,
-) -> float:
-    """
-    Euler step for s (eq. 3.53), scaled by institutional adaptation rate λ.
-
-    ṡ = λ · s(1−s)·tanh[κ/2·(Π̃_S − Π̃_L)]
-    """
-    a_tilde_SS = a_SS
-    a_tilde_SL = a_SL + b_SL
-    a_tilde_LS = a_LS - b_SL
-    a_tilde_LL = a_LL
-
-    Pi_S  = s * a_tilde_SS + (1 - s) * a_tilde_SL
-    Pi_L  = s * a_tilde_LS + (1 - s) * a_tilde_LL
-    s_dot = s * (1 - s) * float(np.tanh(kappa / 2.0 * (Pi_S - Pi_L)))
-    return float(np.clip(s + lam * dt * s_dot, 0.0, 1.0))
+    return sigma_new

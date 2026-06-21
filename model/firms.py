@@ -11,12 +11,17 @@ f_H[i], f_L[i] — number of H- and L-type firms in jurisdiction i.
 
 Dynamics
 --------
-- Firm location: high-emission firms in strict jurisdictions may relocate to
-  lax jurisdictions via eq. (3.17).  Disabled when p.relocate = False.
-- Emission strategy share h: replicator equation (3.18).
+- Firm location: H-firms relocate to neighbouring jurisdictions via eq. (3.36).
+  Disabled when p.relocate is False.
+- Emission type: agent-level Fermi imitation (eq. 3.42).  Each firm with
+  probability nu*dt samples a random partner from the global pool and adopts
+  its type with Fermi probability expit(kappa_f * (profit_partner - profit_self)).
+  Rate nu sets the timescale; kappa_f sets sharpness.  Mean-field limit recovers
+  the standard replicator h_dot = nu*h*(1-h)*tanh(kappa_f*(pi_H_bar - pi_L_bar)/2).
 """
 
 import numpy as np
+from scipy.special import expit
 from params import Params
 
 
@@ -25,10 +30,7 @@ from params import Params
 # ---------------------------------------------------------------------------
 
 def init_firms(p: Params, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Randomly assign M firms to jurisdictions and emission types.
-    Returns (firm_loc, firm_type).
-    """
+    """Randomly assign M firms to jurisdictions and emission types."""
     firm_loc  = rng.integers(0, p.N, size=p.M)
     firm_type = (rng.random(p.M) < p.h0).astype(int)   # 1 = H, 0 = L
     return firm_loc, firm_type
@@ -50,7 +52,7 @@ def count_firms(
 
 
 # ---------------------------------------------------------------------------
-# Relocation dynamics — eq. (3.17)
+# Relocation dynamics — eq. (3.36)
 # ---------------------------------------------------------------------------
 
 def relocate_firms(
@@ -63,14 +65,11 @@ def relocate_firms(
     W: np.ndarray = None,    # (N, N) weight matrix; restricts relocation to neighbours
 ) -> np.ndarray:
     """
-    Update firm_loc for high-emission firms based on profit incentives (eq. 3.17).
-
-    Disabled entirely when p.relocate is False.
+    Update firm_loc for high-emission firms based on profit incentives (eq. 3.36).
 
     For each H-firm in jurisdiction i, find the most profitable neighbouring
-    jurisdiction j.  If pi_H[j] > pi_H[i], compute the relocation probability
-    µ_ij = µ · min(1, Δπ/π_ref) where π_ref = mean(pi_H[lax jurisdictions]).
-    Move with probability µ_ij · dt.
+    jurisdiction j.  If pi_H[j] > pi_H[i], move with probability
+    mu * min(1, delta_pi/pi_ref) * dt.
     """
     if not p.relocate:
         return firm_loc
@@ -79,7 +78,6 @@ def relocate_firms(
     if len(h_firms) == 0:
         return firm_loc
 
-    # Reference profit: mean H-firm profit in lax jurisdictions
     lax_mask = sigma == 0
     if lax_mask.any() and pi_H[lax_mask].max() > 0:
         pi_ref = float(np.mean(pi_H[lax_mask]))
@@ -108,40 +106,50 @@ def relocate_firms(
 
 
 # ---------------------------------------------------------------------------
-# Emission strategy replicator — eq. (3.18)
+# Emission type update — agent-level Fermi imitation (eq. 3.42)
 # ---------------------------------------------------------------------------
 
-def emission_replicator(
-    h: float,
-    pi_H_bar: float,
-    pi_L_bar: float,
+def firm_type_update(
+    firm_type: np.ndarray,   # (M,) int  1=H, 0=L
+    profit: np.ndarray,      # (M,) float  realised profit of each firm this step
+    nu: float,               # revision rate  (timescale knob, same units as lambda/mu)
+    kappa_f: float,          # selection intensity  (sharpness knob)
     dt: float,
-) -> float:
+    rng: np.random.Generator,
+    eps: float = 0.0,        # spontaneous mutation rate (keeps boundaries leaky)
+) -> np.ndarray:
     """
-    Euler step for h (share of high-emission firms).
+    Each firm independently gets a revision opportunity with prob nu*dt.
+    On revision: sample one partner uniformly from the GLOBAL pool (well-mixed),
+    adopt partner's type with Fermi probability expit(kappa_f * (pi_partner - pi_self)).
 
-    h_dot = h (1-h) (pi_H_bar - pi_L_bar)
+    Returns a new array (synchronous: reads from old firm_type, writes to copy).
+
+    Mean-field limit: h_dot = nu * h*(1-h) * tanh(kappa_f * (pi_H_bar - pi_L_bar) / 2)
+    Rate is bounded by nu regardless of profit magnitude — that is the fix.
     """
-    h_dot = h * (1 - h) * (pi_H_bar - pi_L_bar)
-    return float(np.clip(h + dt * h_dot, 0.0, 1.0))
+    M = firm_type.size
+    new_type = firm_type.copy()
 
+    revise = rng.random(M) < nu * dt
+    idx = np.where(revise)[0]
 
-def average_profits(
-    firm_loc: np.ndarray,
-    firm_type: np.ndarray,
-    pi_H: np.ndarray,   # (N,) variable profit per H-firm in each jurisdiction
-    pi_L: np.ndarray,   # (N,) variable profit per L-firm in each jurisdiction
-    F: float,
-) -> tuple[float, float]:
-    """
-    Compute pi_H_bar and pi_L_bar across all active firms.
+    if idx.size > 0:
+        partners = rng.integers(0, M, size=idx.size)
+        # forbid self-sampling (would be a no-op but skews the h(1-h) weighting)
+        clash = partners == idx
+        while clash.any():
+            partners[clash] = rng.integers(0, M, size=int(clash.sum()))
+            clash = partners == idx
 
-    Variable profit per firm is taken from the jurisdiction the firm resides in.
-    Fixed cost F is subtracted to give total profit.
-    """
-    h_mask = firm_type == 1
-    l_mask = firm_type == 0
+        dpi = profit[partners] - profit[idx]
+        p_switch = expit(kappa_f * dpi)   # scipy.special.expit: stable for large |x|
+        do_switch = rng.random(idx.size) < p_switch
+        # read partner types from OLD array (synchronous update)
+        new_type[idx[do_switch]] = firm_type[partners[do_switch]]
 
-    pi_H_bar = float(np.mean(pi_H[firm_loc[h_mask]] - F)) if h_mask.any() else 0.0
-    pi_L_bar = float(np.mean(pi_L[firm_loc[l_mask]] - F)) if l_mask.any() else 0.0
-    return pi_H_bar, pi_L_bar
+    if eps > 0.0:
+        flip = rng.random(M) < eps * dt
+        new_type[flip] = 1 - new_type[flip]
+
+    return new_type

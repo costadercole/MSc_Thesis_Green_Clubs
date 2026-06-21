@@ -2,28 +2,26 @@
 Main simulation loop — §3.9.
 
 At each time step:
-  (i)   compute equilibrium prices p*_i  (market.py)
-  (ii)  compute firm profits and jurisdiction welfare
-  (iii) update firm locations (relocation)
-  (iv)  update h and s via replicator equations
+  1. Solve Cournot market given current firm_type, firm_loc, sigma
+  2. Compute per-firm profits and jurisdiction welfare (incl. output-based damage)
+  3. Relocate H-firms to neighbouring jurisdictions (eq. 3.36, rate mu)
+  4. Update firm emission types via agent-level Fermi imitation (eq. 3.42, rate nu)
+  5. Update jurisdiction policies via agent-level Fermi imitation (eq. 3.41, rate lam)
 
-Returns a dict of time-series arrays for downstream analysis.
+All three stochastic processes (mu, nu, lam) operate on the same dt-scaled
+Poisson rate, so their relative speeds are directly controlled by mu/lam and nu/lam.
 """
 
 import numpy as np
 from params import Params
 from model.network import build_network, effective_degree
-from model.firms import (
-    init_firms, count_firms,
-    relocate_firms, emission_replicator, average_profits,
-)
+from model.firms import init_firms, count_firms, relocate_firms, firm_type_update
 from model.jurisdictions import (
     init_jurisdictions, init_populations,
-    payoff_matrix, network_correction, policy_replicator,
+    fiscal_revenues, per_capita_welfare,
+    fermi_policy_update,
 )
-from model.market import (
-    equilibrium_prices, firm_variable_profits,
-)
+from model.market import solve_market, firm_variable_profits
 
 
 def run(p: Params) -> dict:
@@ -44,19 +42,12 @@ def run(p: Params) -> dict:
     """
     rng = np.random.default_rng(p.seed)
 
-    # --- Build network ---
     G, W = build_network(p.N, p.k, p.topology, p.seed)
-    k_eff = effective_degree(G)
 
-    # --- Initialise state ---
-    P          = init_populations(p, rng)
-    sigma      = init_jurisdictions(p, rng)
+    P                   = init_populations(p, rng)
+    sigma               = init_jurisdictions(p, rng)
     firm_loc, firm_type = init_firms(p, rng)
 
-    h = float(np.mean(firm_type))
-    s = float(np.mean(sigma))
-
-    # --- Pre-allocate storage ---
     T = p.T
     rec_h      = np.empty(T)
     rec_s      = np.empty(T)
@@ -65,33 +56,52 @@ def run(p: Params) -> dict:
     rec_p_star = np.empty((T, p.N))
     rec_sigma  = np.empty((T, p.N), dtype=int)
 
-    # --- Main loop ---
-    for step in range(T):
-        # (i) equilibrium prices
+    # Burn-in: relocation only, no type-switching or policy updates.
+    # Lets H-firms sort into lax jurs before the coupled dynamics begin.
+    T_burnin = getattr(p, "T_burnin", 0)
+    for _ in range(T_burnin):
         f_H, f_L = count_firms(firm_loc, firm_type, p.N)
-        p_star   = equilibrium_prices(f_H, f_L, sigma, P, p.c_H, p.c_L, p.t, p.a, p.b)
+        _, q_H, q_L = solve_market(f_H, f_L, sigma, P, W, p)
+        pi_H, _ = firm_variable_profits(q_H, q_L, P, p)
+        firm_loc = relocate_firms(firm_loc, firm_type, sigma, pi_H, p, rng, W=W)
 
-        # (ii) firm profits
-        pi_H, pi_L = firm_variable_profits(p_star, f_H, f_L, sigma, P, p.c_H, p.c_L, p.t, p.b)
+    for step in range(T):
+        # Step 1: solve goods market
+        f_H, f_L = count_firms(firm_loc, firm_type, p.N)
+        p_star, q_H, q_L = solve_market(f_H, f_L, sigma, P, W, p)
 
-        # (iii) relocate firms, then recompute prices and profits
-        firm_loc   = relocate_firms(firm_loc, firm_type, sigma, pi_H, p, rng)
-        f_H, f_L   = count_firms(firm_loc, firm_type, p.N)
-        p_star     = equilibrium_prices(f_H, f_L, sigma, P, p.c_H, p.c_L, p.t, p.a, p.b)
-        pi_H, pi_L = firm_variable_profits(p_star, f_H, f_L, sigma, P, p.c_H, p.c_L, p.t, p.b)
+        # Step 2: per-firm profits and jurisdiction welfare
+        pi_H, pi_L = firm_variable_profits(q_H, q_L, P, p)
+        TR         = fiscal_revenues(f_H, f_L, sigma, W, q_H, q_L, p)
+        welfare    = per_capita_welfare(f_H, sigma, P, p_star, TR, p, q_H, f_L, q_L)
 
-        # (iv-a) emission replicator → update firm types
-        pi_H_bar, pi_L_bar = average_profits(firm_loc, firm_type, pi_H, pi_L, p.F)
-        h = emission_replicator(h, pi_H_bar, pi_L_bar, p.dt)
-        _apply_h(firm_type, h, rng)
+        # Build per-firm profit vector: each firm earns the profit of its type
+        # in its current jurisdiction (pi_H or pi_L indexed by firm_loc).
+        profit = np.where(
+            firm_type == 1,
+            pi_H[firm_loc],   # H-firm profit in its jurisdiction
+            pi_L[firm_loc],   # L-firm profit in its jurisdiction
+        )
 
-        # (iv-b) policy replicator → update sigma
-        a_SS, a_SL, a_LS, a_LL = payoff_matrix(f_H, f_L, sigma, P, p_star, W, p)
-        b_SL = network_correction(a_SS, a_SL, a_LS, a_LL, k_eff)
-        s = policy_replicator(s, a_SS, a_SL, a_LS, a_LL, b_SL, p.dt, p.kappa, p.lam)
-        _apply_s(sigma, s, rng)
+        # Step 3: relocate H-firms (eq. 3.36, rate mu)
+        firm_loc = relocate_firms(firm_loc, firm_type, sigma, pi_H, p, rng, W=W)
 
-        # Record
+        # Step 4: firm type update — Fermi imitation from global pool (eq. 3.42, rate nu)
+        firm_type = firm_type_update(
+            firm_type, profit,
+            nu=p.nu, kappa_f=p.kappa_f, dt=p.dt, rng=rng, eps=p.eps,
+        )
+        h = float(np.mean(firm_type))
+
+        # Step 5: jurisdiction policy update — Fermi imitation (eq. 3.41, rate lam)
+        # Recompute market after relocation + type changes for accurate welfare
+        f_H, f_L = count_firms(firm_loc, firm_type, p.N)
+        p_star, q_H, q_L = solve_market(f_H, f_L, sigma, P, W, p)
+        TR      = fiscal_revenues(f_H, f_L, sigma, W, q_H, q_L, p)
+        welfare = per_capita_welfare(f_H, sigma, P, p_star, TR, p, q_H, f_L, q_L)
+        sigma   = fermi_policy_update(sigma, welfare, W, p, rng)
+        s       = float(np.mean(sigma))
+
         rec_h[step]      = h
         rec_s[step]      = s
         rec_f_H[step]    = f_H
@@ -110,39 +120,3 @@ def run(p: Params) -> dict:
         "P":      P,
         "W":      W,
     }
-
-
-# ---------------------------------------------------------------------------
-# Helpers: reconcile continuous replicator values with discrete agent arrays
-# ---------------------------------------------------------------------------
-
-def _apply_h(firm_type: np.ndarray, h_target: float, rng: np.random.Generator) -> None:
-    """Convert firm types so fraction of H-firms matches h_target (in-place)."""
-    M = len(firm_type)
-    gap = h_target - float(np.mean(firm_type))
-    if gap > 0:
-        idx = np.where(firm_type == 0)[0]
-        n = min(int(round(gap * M)), len(idx))
-        if n > 0:
-            firm_type[rng.choice(idx, n, replace=False)] = 1
-    elif gap < 0:
-        idx = np.where(firm_type == 1)[0]
-        n = min(int(round(-gap * M)), len(idx))
-        if n > 0:
-            firm_type[rng.choice(idx, n, replace=False)] = 0
-
-
-def _apply_s(sigma: np.ndarray, s_target: float, rng: np.random.Generator) -> None:
-    """Flip jurisdiction policies so fraction of strict matches s_target (in-place)."""
-    N = len(sigma)
-    gap = s_target - float(np.mean(sigma))
-    if gap > 0:
-        idx = np.where(sigma == 0)[0]
-        n = min(int(round(gap * N)), len(idx))
-        if n > 0:
-            sigma[rng.choice(idx, n, replace=False)] = 1
-    elif gap < 0:
-        idx = np.where(sigma == 1)[0]
-        n = min(int(round(-gap * N)), len(idx))
-        if n > 0:
-            sigma[rng.choice(idx, n, replace=False)] = 0

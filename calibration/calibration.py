@@ -67,11 +67,13 @@ TARGETS = {
 # Internal helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _make_params(c_L: float, t: float, g: float, relocate: bool, seed: int) -> Params:
+def _make_params(c_L: float, t: float, g: float, relocate: bool, seed: int,
+                 tau: float = None, tau_BA: float = None) -> Params:
     return Params(
         N=cfg.N, M=cfg.M, k=cfg.k, topology=cfg.topology,
         a=A, b=B, c_H=C_H, c_L=c_L, t=t, g=g,
-        tau=cfg.tau, tau_BA=cfg.tau_BA,
+        tau=cfg.tau if tau is None else tau,
+        tau_BA=cfg.tau_BA if tau_BA is None else tau_BA,
         delta_loc=cfg.delta_loc, delta_glob=cfg.delta_glob, F=F,
         mu=cfg.mu, lam=cfg.lam, kappa=cfg.kappa,
         relocate=relocate, dt=cfg.dt, T=cfg.T, seed=seed,
@@ -148,7 +150,8 @@ def _type_groups_per_market(f_H, f_L, W) -> float:
 # Core: single replication
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_one(delta_c: float, t_ratio: float, g: float, seed: int = 42) -> dict:
+def run_one(delta_c: float, t_ratio: float, g: float, seed: int = 42,
+            tau: float = None, tau_BA: float = None) -> dict:
     """
     Compute all three moments for a single stochastic replication.
 
@@ -158,6 +161,8 @@ def run_one(delta_c: float, t_ratio: float, g: float, seed: int = 42) -> dict:
     t_ratio : t / delta_c
     g       : per-unit transport cost
     seed    : RNG seed (controls network, firm placement, and relocation draws)
+    tau     : bilateral fiscal tariff (defaults to cfg.tau)
+    tau_BA  : border carbon adjustment (defaults to cfg.tau_BA)
 
     Returns
     -------
@@ -170,7 +175,8 @@ def run_one(delta_c: float, t_ratio: float, g: float, seed: int = 42) -> dict:
 
     rng, P, firm_loc, firm_type, W = _build_state(seed)
 
-    p_static = _make_params(c_L, t, g, relocate=False, seed=seed)
+    p_static = _make_params(c_L, t, g, relocate=False, seed=seed,
+                            tau=tau, tau_BA=tau_BA)
 
     f_H, f_L  = count_firms(firm_loc, firm_type, cfg.N)
     sigma_lax = np.zeros(cfg.N, dtype=int)
@@ -233,14 +239,16 @@ def run_one(delta_c: float, t_ratio: float, g: float, seed: int = 42) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def compute_moments(delta_c: float, t_ratio: float, g: float,
-                    n_reps: int = 3, base_seed: int = 42) -> dict:
+                    n_reps: int = 3, base_seed: int = 42,
+                    tau: float = None, tau_BA: float = None) -> dict:
     """
     Run n_reps replications and return mean ± std for each moment.
 
     Returns a dict suitable for writing to CSV or printing.
     The keys *_ok are 1 if the mean falls in the target band, 0 otherwise.
     """
-    reps  = [run_one(delta_c, t_ratio, g, base_seed + r) for r in range(n_reps)]
+    reps  = [run_one(delta_c, t_ratio, g, base_seed + r,
+                     tau=tau, tau_BA=tau_BA) for r in range(n_reps)]
     valid = [r for r in reps if r["error"] is None]
 
     def _ms(key):

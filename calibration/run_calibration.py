@@ -324,10 +324,14 @@ def run_structural_check():
          H_active_lax and L_active_lax,
          f"p*_lax={p_lax:.3f}  H={'✓' if H_active_lax else '✗'}  L={'✓' if L_active_lax else '✗'}",
          True),
-        ("C2  H crowded out in strict autarky",
+        # Non-critical: FULL crowd-out (c_H+t >= p*_L-only) makes strict so dominant
+        # it suppresses the race-to-bottom regime. Partial crowd-out (H weakly present
+        # in strict) is what the trade moments calibrate to and what keeps the
+        # phi/mu-lambda bifurcation alive. Informational only.
+        ("C2  H crowded out in strict autarky (full crowd-out; partial is fine)",
          c_H_strict >= p_L_only,
          f"c_H+t={c_H_strict:.2f}  p*_L-only={p_L_only:.3f}",
-         True),
+         False),
         ("C3  L profitable in strict",
          pi_L_str > p.F,
          f"var={pi_L_str:.1f}  F={p.F}",

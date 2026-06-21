@@ -34,27 +34,42 @@ def convergence_time(series: np.ndarray, threshold: float = 0.05) -> int:
     return 0
 
 
-def classify_outcome(h_ss: float, s_ss: float, tol: float = 0.1) -> str:
+def classify_outcome(h_ss: float, s_ss: float) -> str:
     """
-    Label the steady-state outcome.
+    Label the steady-state outcome using a 3×3 grid in (h, s) space.
 
-    green_club        : h ≈ 0, s ≈ 1
-    race_to_bottom    : h ≈ 1, s ≈ 0
-    mixed             : neither corner
-    full_dirty_strict : h ≈ 1, s ≈ 1  (strict but with dirty firms)
-    full_clean_lax    : h ≈ 0, s ≈ 0
+    h axis (high-emission firm share):
+      low    h < 0.33   — mostly clean firms
+      mid    0.33–0.67  — mixed firm composition
+      high   h > 0.67   — mostly dirty firms
+
+    s axis (strict jurisdiction share):
+      low    s < 0.33   — mostly lax jurisdictions
+      mid    0.33–0.67  — mixed policy
+      high   s > 0.67   — mostly strict jurisdictions
+
+    Labels (9 cells):
+      green_club          h_low,  s_high  — the target outcome
+      partial_club        h_low,  s_mid   — some clubs, mostly clean
+      clean_lax           h_low,  s_low   — clean firms but no policy
+      dirty_strict        h_high, s_high  — strict policy but leaky
+      race_to_bottom      h_high, s_low   — dirty firms, no policy
+      dirty_mixed_policy  h_high, s_mid
+      transitional_clean  h_mid,  s_high
+      transitional        h_mid,  s_mid
+      transitional_lax    h_mid,  s_low
     """
-    h0 = h_ss < tol
-    h1 = h_ss > 1 - tol
-    s0 = s_ss < tol
-    s1 = s_ss > 1 - tol
+    h_low  = h_ss < 0.33
+    h_high = h_ss > 0.67
+    s_low  = s_ss < 0.33
+    s_high = s_ss > 0.67
 
-    if h0 and s1:
-        return "green_club"
-    if h1 and s0:
-        return "race_to_bottom"
-    if h0 and s0:
-        return "full_clean_lax"
-    if h1 and s1:
-        return "full_dirty_strict"
-    return "mixed"
+    if h_low  and s_high: return "green_club"
+    if h_low  and s_low:  return "clean_lax"
+    if h_low:             return "partial_club"
+    if h_high and s_low:  return "race_to_bottom"
+    if h_high and s_high: return "dirty_strict"
+    if h_high:            return "dirty_mixed_policy"
+    if s_high:            return "transitional_clean"
+    if s_low:             return "transitional_lax"
+    return "transitional"

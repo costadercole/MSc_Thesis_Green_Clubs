@@ -1,18 +1,0 @@
-========================================================================
-Corner stability pre-check (single trajectory each, h0=0.5, s0=0.5)
-========================================================================
-  mu=  0.1200  lam=  0.2000  ->  h_final=1.000  s_final=0.000  [OK]
-  mu=  0.1200  lam= 20.0000  ->  h_final=1.000  s_final=0.000  [OK]
-  mu= 12.0000  lam=  0.2000  ->  h_final=1.000  s_final=0.000  [OK]
-  mu= 12.0000  lam= 20.0000  ->  h_final=1.000  s_final=0.000  [OK]
-
-========================================================================
-TASK 2: GC basin movement across (mu, lambda)
-        fixed delta_loc=1785.8, tau_BA=4.46
-        mu grid:  ['0.120', '0.600', '2.400', '12.000']
-        lam grid: ['0.200', '1.000', '4.000', '20.000']
-        30x30 (h0,s0) basin map per cell, T=1000
-        14400 trajectories total, using 8 cores
-========================================================================
-  [   200/14400]  elapsed=132s  ETA=9348s     [   400/14400]  elapsed=281s  ETA=9835s     [   600/14400]  elapsed=416s  ETA=9573s     [   800/14400]  elapsed=531s  ETA=9030s     [  1000/14400]  elapsed=692s  ETA=9279s     [  1200/14400]  elapsed=878s  ETA=9660s     [  1400/14400]  elapsed=1037s  ETA=9630s     [  1600/14400]  elapsed=1183s  ETA=9467s     [  1800/14400]  elapsed=1310s  ETA=9169s     [  2000/14400]  elapsed=1472s  ETA=9124s     [  2200/14400]  elapsed=1669s  ETA=9257s     [  2400/14400]  elapsed=1827s  ETA=9134s     [  2600/14400]  elapsed=1966s  ETA=8924s     [  2800/14400]  elapsed=2126s  ETA=8808s   /Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/multiprocessing/resource_tracker.py:216: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown
-  warnings.warn('resource_tracker: There appear to be %d '

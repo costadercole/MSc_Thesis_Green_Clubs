@@ -545,6 +545,44 @@ class TestC_Accounting:
         expected_cs = (par.a - p_star) ** 2 / (2 * par.b)
         np.testing.assert_allclose(w, expected_cs, rtol=1e-9)
 
+    def test_C6_host_benefit(self):
+        """
+        The host-benefit term adds exactly phi*(E_H + E_L)/P_i to per-capita
+        welfare, where E_X[i] is total type-X output produced in i.  Two checks:
+        (a) the gap between a phi>0 run and an otherwise-identical phi=0 run
+            equals phi*(E_H + E_L)/P_i to tolerance;
+        (b) phi=0 exactly recovers the damage-only welfare.
+        """
+        N    = 2
+        phi0 = 7.0
+        common = dict(c_L=5.0, t=0.0, tau=0.0, tau_BA=0.0,
+                      delta_loc=0.0, delta_glob=0.0, g=100.0)
+        par0 = make_params(phi=0.0,  **common)
+        par1 = make_params(phi=phi0, **common)
+
+        f_H   = np.array([2.0, 1.0])
+        f_L   = np.array([1.0, 3.0])
+        sigma = np.zeros(N, dtype=int)     # lax → H firms produce (no carbon tax)
+        P     = np.array([10.0, 4.0])      # uneven sizes → exercises the /P_i scaling
+        W     = np.zeros((N, N))
+        TR    = np.zeros(N)
+
+        p_star, q_H, q_L = solve_market(f_H, f_L, sigma, P, W, par0)
+
+        w0 = per_capita_welfare(f_H, sigma, P, p_star, TR, par0, q_H, f_L, q_L)
+        w1 = per_capita_welfare(f_H, sigma, P, p_star, TR, par1, q_H, f_L, q_L)
+
+        E_H    = f_H * q_H.sum(axis=0)
+        E_L    = f_L * q_L.sum(axis=0)
+        P_safe = np.maximum(P, 1.0)
+        expected_gain = phi0 * (E_H + E_L) / P_safe
+
+        # (a) the welfare gain is exactly the host-benefit term
+        np.testing.assert_allclose(w1 - w0, expected_gain, rtol=1e-9)
+        # (b) phi=0 recovers the damage-only value (term inactive)
+        w0_damage_only = per_capita_welfare(f_H, sigma, P, p_star, TR, par0, q_H)
+        np.testing.assert_allclose(w0, w0_damage_only, rtol=1e-9)
+
 
 # ---------------------------------------------------------------------------
 # Group D: degenerate / sanity
