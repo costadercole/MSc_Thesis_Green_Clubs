@@ -16,7 +16,8 @@ Validation: the tau_BA = 0.5 column must reproduce Experiment 3 (phi=1500): s0* 
 Run:
   python experiments/experiment4_bca_nucleation.py            # full 30x30, 6 seeds, T=2000
   python experiments/experiment4_bca_nucleation.py --quick    # coarse 12x12, 2 seeds, T=1000
-Outputs: output/exp4_s0_tauBA_map.{png,csv}, output/exp4_threshold_curve.png
+Outputs: output/experiment_4/exp4_s0_tauBA_map.{png,csv},
+         output/experiment_4/exp4_threshold_curve.png
 """
 
 import os, sys, argparse
@@ -27,6 +28,9 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sweep_lib import run_grid, save_csv, plot_grid, modal_regime, p_green, REGIME_GREEN, BASELINE
+
+OUTDIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "output", "experiment_4")
 
 H0_DIRTY = 0.9
 TABLE_TAUBA = [0.0, 0.25, 0.5, 0.75, 1.0]
@@ -78,11 +82,11 @@ def main():
 
     res = run_grid("tau_BA", np.linspace(0.0, 1.0, nx), "s0", np.linspace(0.0, 1.0, ny),
                    dict(mu=1.0, lam=1.0, nu=1.0, h0=H0_DIRTY, tau=0.5), seeds=seeds, T=T)
-    save_csv(res, "exp4_s0_tauBA_map")
+    save_csv(res, "exp4_s0_tauBA_map", outdir=OUTDIR)
     plot_grid(res, "exp4_s0_tauBA_map",
               "Founding a green club: outcome over border charge $\\tau_{BA}$ and initial coalition $s_0$",
               xlabel="$\\tau_{BA}$  (border carbon adjustment)",
-              ylabel="$s_0$  (founding strict coalition)")
+              ylabel="$s_0$  (founding strict coalition)", outdir=OUTDIR)
 
     tauBA, s0star = s0_star_curve(res)
     _, tip, band = tipping_and_band(res)
@@ -101,9 +105,10 @@ def main():
     ax.set_ylabel("founding coalition $s_0$")
     ax.set_ylim(-0.03, 1.03); ax.set_title("Border charge lowers the founding threshold")
     ax.legend(loc="best", framealpha=0.9); fig.tight_layout()
-    fig.savefig("output/exp4_threshold_curve.png", dpi=150, bbox_inches="tight")
+    curve_path = os.path.join(OUTDIR, "exp4_threshold_curve.png")
+    fig.savefig(curve_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print("  saved output/exp4_threshold_curve.png")
+    print(f"  saved {curve_path}")
 
     # table at canonical tau_BA values
     print("\n  tau_BA | s0*  | tipping s0 | transition band")

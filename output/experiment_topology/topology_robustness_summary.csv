@@ -1,0 +1,6 @@
+label,topology,k_or_m,intended_degree,realised_mean_degree,seeds,boundary_median_mu_over_lam,boundary_mean_mu_over_lam,n_rows_with_crossing,green_club_share,race_to_bottom_share
+er,er,3,3.000,2.920,8,0.6733,0.7791,30,0.5033,0.4811
+ring_k2,ring,2,2.000,2.000,8,2.8943,3.2541,30,0.7156,0.2044
+ring_k4,ring,4,4.000,4.000,8,0.3925,0.4483,30,0.3900,0.5767
+ba_m1,ba,1,2.000,1.960,8,0.3973,0.4339,30,0.3811,0.5611
+ba_m2,ba,2,4.000,3.840,8,0.2311,0.2243,29,0.3056,0.6689

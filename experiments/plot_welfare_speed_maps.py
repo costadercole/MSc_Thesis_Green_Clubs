@@ -22,8 +22,8 @@ from matplotlib.colors import TwoSlopeNorm
 from scipy.ndimage import gaussian_filter
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CSV_PATH = os.path.join(_ROOT, "output", "exp1_speed_map.csv")
-OUT_PATH = os.path.join(_ROOT, "output", "welfare_speed_maps.png")
+CSV_PATH = os.path.join(_ROOT, "output", "experiment_welfare", "exp1_speed_map.csv")
+OUT_PATH = os.path.join(_ROOT, "output", "experiment_welfare", "welfare_speed_maps.png")
 
 # ── load CSV ────────────────────────────────────────────────────────────────────
 rows = []

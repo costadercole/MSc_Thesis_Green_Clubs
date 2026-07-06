@@ -16,8 +16,9 @@ delta_glob=250, c_L=6, t=3, g=2.3) carried in params.BASELINE.
 Run:
   python experiments/experiment_tauBA.py            # full 30×30×4, T=2000
   python experiments/experiment_tauBA.py --quick     # coarse 12×12×2, T=1000
-Outputs: output/expA_tauBA_map.{npz,png}, output/expA_tau_map.{npz,png},
-         headline numbers appended to output/results_notes.md
+Outputs: output/experiment_tauBA/expA_tauBA_map.{csv,png},
+         output/experiment_tauBA/expA_tau_map.{csv,png};
+         headline numbers print to stdout.
 """
 
 import os, sys, argparse
@@ -25,6 +26,9 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sweep_lib import run_grid, save_csv, plot_grid, mean_R, BASELINE
+
+OUTDIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "output", "experiment_tauBA")
 
 MU_TICKS = [0.02, 0.05, 0.1, 0.5, 1, 5, 10, 20]
 TARGET_RATIOS = [1.0, 3.0]          # mu/lambda targets for "minimum effective lever"
@@ -86,10 +90,10 @@ def per_unit_slope(mu, levstar):
 
 def run_map(lever_name, lever_vals, fixed, nx, seeds, T, tag, title):
     res = run_grid("mu", mu_axis(nx), lever_name, lever_vals, fixed, seeds=seeds, T=T)
-    save_csv(res, tag)
+    save_csv(res, tag, outdir=OUTDIR)
     plot_grid(res, tag, title, xlabel="$\\mu$  (firm mobility = $\\mu/\\lambda$)",
               ylabel=("$\\tau_{BA}$  (border adjustment)" if lever_name == "tau_BA"
-                      else "$\\tau$  (generic tariff)"),
+                      else "$\\tau$  (generic tariff)"), outdir=OUTDIR,
               xlog=True, xticks=MU_TICKS, hline=0.5, hline_label="baseline = 0.5")
     return res
 

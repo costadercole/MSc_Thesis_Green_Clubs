@@ -147,7 +147,7 @@ def panel(ax, s0, seed, success: bool):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--outdir", default="output")
+    ap.add_argument("--outdir", default=os.path.join(_ROOT, "output", "experiment_welfare"))
     ap.add_argument("--s0_success", type=float, default=0.95)
     ap.add_argument("--s0_fail", type=float, default=0.70)
     ap.add_argument("--seed", type=int, default=42)

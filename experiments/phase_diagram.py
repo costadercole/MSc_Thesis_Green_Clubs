@@ -24,7 +24,7 @@ Run:
   python experiments/phase_diagram.py speed
   python experiments/phase_diagram.py speed --phi 560   # tune the structural point
 
-Outputs: output/phase_<preset>.png  and  output/phase_<preset>.csv
+Outputs: output/experiment_1/phase_<preset>.png  and  output/experiment_1/phase_<preset>.csv
 """
 
 import sys, os, csv, time, argparse, itertools
@@ -45,6 +45,8 @@ from model.simulation import run
 from analysis.metrics import steady_state
 
 N_WORKERS = int(os.environ.get("SLURM_CPUS_PER_TASK", cpu_count()))
+
+OUTDIR = os.path.join(_ROOT, "output", "experiment_1")
 
 # Coarse regime thresholds (collapse the 9-cell classifier to 3).
 GREEN_H_HI = 0.33     # green club: h below this ...
@@ -193,8 +195,8 @@ def _progress_bar(k, total, t0, width=40):
 
 
 def _save_csv(name, xname, yname, xvals, yvals, modal, p_rtb, h_map, s_map):
-    path = f"output/phase_{name}.csv"
-    os.makedirs("output", exist_ok=True)
+    path = os.path.join(OUTDIR, f"phase_{name}.csv")
+    os.makedirs(OUTDIR, exist_ok=True)
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow([xname, yname, "regime", "p_rtb", "h_ss", "s_ss"])
@@ -247,7 +249,7 @@ def _plot(name, xname, yname, xvals, yvals, modal, p_rtb, h_map, s_map, args):
         sub = "mu=lam (neutral speed); regime set by economic fundamentals"
     fig.suptitle(f"Phase diagram — {name}   [{sub}]", y=1.02)
     fig.tight_layout()
-    path = f"output/phase_{name}.png"
+    path = os.path.join(OUTDIR, f"phase_{name}.png")
     fig.savefig(path, dpi=130, bbox_inches="tight")
     print(f"  saved {path}")
 
@@ -263,5 +265,5 @@ if __name__ == "__main__":
                     help="speed preset: structural point delta_loc (wide-gradient row)")
     args = ap.parse_args()
 
-    os.makedirs("output", exist_ok=True)
+    os.makedirs(OUTDIR, exist_ok=True)
     run_preset(args.preset, args)

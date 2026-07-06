@@ -29,8 +29,8 @@ python -c "import numpy, scipy, matplotlib, networkx" \
 mkdir -p logs
 
 # 5. Run Experiment B (minimum viable club) at three structural anchors, 6 seeds.
-#    Produces only output/expB_s0_map[_phiXXXX].{png,csv} and
-#    output/expB_hysteresis[_phiXXXX].{png,csv}; headlines print to this .out log.
+#    Produces only output/experiment_min_club/expB_s0_map[_phiXXXX].{png,csv} and
+#    output/experiment_min_club/expB_hysteresis[_phiXXXX].{png,csv}; headlines print to this .out log.
 for PHI in 1500 1350 1200; do
     echo "================ phi = $PHI ================"
     python experiments/experiment_min_club.py --phi $PHI --seeds 6

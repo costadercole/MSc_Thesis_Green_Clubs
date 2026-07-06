@@ -23,6 +23,9 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sweep_lib import run_grid, save_csv, plot_grid, BASELINE
 
+OUTDIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "output", "experiment_welfare")
+
 MU_TICKS  = [0.02, 0.05, 0.1, 0.5, 1, 5, 10, 20]
 LAM_TICKS = [0.1, 0.2, 0.5, 1, 2, 5]
 
@@ -31,10 +34,10 @@ def run_speed(n, seeds, T):
     res = run_grid("mu",  np.exp(np.linspace(np.log(0.02), np.log(20.0), n)),
                    "lam", np.exp(np.linspace(np.log(0.1),  np.log(5.0),  n)),
                    dict(phi=1500.0, delta_loc=1000.0, nu=None), seeds=seeds, T=T)
-    save_csv(res, "exp1_speed_map")
+    save_csv(res, "exp1_speed_map", outdir=OUTDIR)
     plot_grid(res, "exp1_speed_map",
               "Regulatory outcome by firm mobility $\\mu$ and institutional speed $\\lambda$",
-              xlabel="$\\mu$", ylabel="$\\lambda$",
+              xlabel="$\\mu$", ylabel="$\\lambda$", outdir=OUTDIR,
               xlog=True, ylog=True, xticks=MU_TICKS, yticks=LAM_TICKS)
 
 
@@ -42,10 +45,11 @@ def run_structural(n, seeds, T):
     res = run_grid("phi",       np.linspace(0, 2500, n),
                    "delta_loc", np.linspace(200, 1500, n),
                    dict(mu=1.0, lam=1.0, nu=1.0), seeds=seeds, T=T)
-    save_csv(res, "exp1_structural_map")
+    save_csv(res, "exp1_structural_map", outdir=OUTDIR)
     plot_grid(res, "exp1_structural_map",
               "Regulatory outcome by host benefit $\\varphi$ and local damage $\\delta_{loc}$",
-              xlabel="$\\varphi$  (host benefit)", ylabel="$\\delta_{loc}$  (local damage)")
+              xlabel="$\\varphi$  (host benefit)", ylabel="$\\delta_{loc}$  (local damage)",
+              outdir=OUTDIR)
 
 
 def main():

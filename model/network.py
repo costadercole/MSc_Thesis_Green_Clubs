@@ -10,14 +10,22 @@ import numpy as np
 import networkx as nx
 
 
-def build_network(N: int, k: int, topology: str, seed: int) -> tuple[nx.Graph, np.ndarray]:
+def build_network(N: int, k: int, topology: str, seed: int, m: int | None = None) -> tuple[nx.Graph, np.ndarray]:
     """
     Returns (G, W).
 
     topology: "ring" | "er" | "ba"
-      - ring : k-regular ring lattice (Watts-Strogatz with p=0)
+      - ring : k-regular ring lattice (Watts-Strogatz with p=0). Watts-Strogatz
+               connects each node to k // 2 neighbours on each side, so the
+               REALISED degree is 2 * (k // 2): exact only for even k. Odd k
+               silently rounds down (k=3 -> degree 2), so callers that need an
+               exact degree must pass an even k.
       - er   : Erdős–Rényi with p = k / (N - 1)
-      - ba   : Barabási–Albert with m = k // 2  →  mean degree ≈ k
+      - ba   : Barabási–Albert with mean degree ≈ 2*m. By default
+               m = max(1, k // 2), but note this map is NOT injective:
+               k=1 and k=2 both give m=1. Pass `m` explicitly to select an
+               exact attachment parameter (e.g. to distinguish m=1 from m=2)
+               instead of deriving it from k.
     """
     rng = np.random.default_rng(seed)
 
@@ -27,8 +35,8 @@ def build_network(N: int, k: int, topology: str, seed: int) -> tuple[nx.Graph, n
         p_er = k / (N - 1)
         G = nx.erdos_renyi_graph(N, p_er, seed=int(rng.integers(1 << 31)))
     elif topology == "ba":
-        m = max(1, k // 2)
-        G = nx.barabasi_albert_graph(N, m, seed=int(rng.integers(1 << 31)))
+        m_eff = m if m is not None else max(1, k // 2)
+        G = nx.barabasi_albert_graph(N, m_eff, seed=int(rng.integers(1 << 31)))
     else:
         raise ValueError(f"Unknown topology '{topology}'. Choose 'ring', 'er', or 'ba'.")
 

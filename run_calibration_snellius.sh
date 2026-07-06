@@ -29,5 +29,8 @@ source .venv/bin/activate
 # 5. Create logs directory if it doesn't exist
 mkdir -p logs
 
-# 6. Run the calibration + bifurcation search
-python calibration/calibrate_then_bifurcate.py
+# 6. Run both calibration phases:
+#    phase 1 - trade/market moments (delta_c, t_ratio, g) -> output/calibration/{calibration_grid.csv, baseline_params.json}
+#    phase 2 - regime calibration (phi x delta_loc)       -> output/calibration/damage_calibration.{csv,png}
+python calibration/run_calibration.py
+python calibration/calibrate_damage.py

@@ -10,8 +10,8 @@ Also runs a one-at-a-time sensitivity to identify the dominant dial per moment.
 
 Output
 ------
-  output/calibration_grid.csv    — full grid results
-  output/baseline_params.json    — best-fitting parameter dict (moment table)
+  output/calibration/calibration_grid.csv    — full grid results
+  output/calibration/baseline_params.json    — best-fitting parameter dict (moment table)
 
 Run: python calibration/run_calibration.py
 """
@@ -24,6 +24,8 @@ sys.path.insert(0, os.path.join(_ROOT, "calibration"))
 import numpy as np
 import params as cfg
 from calibration import compute_moments, TARGETS, C_H
+
+OUTDIR = os.path.join(_ROOT, "output", "calibration")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Grid specification
@@ -136,10 +138,10 @@ def run_grid():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def save_and_report(results):
-    os.makedirs("output", exist_ok=True)
+    os.makedirs(OUTDIR, exist_ok=True)
 
     # ── CSV ────────────────────────────────────────────────────────────────
-    csv_path = "output/calibration_grid.csv"
+    csv_path = os.path.join(OUTDIR, "calibration_grid.csv")
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDS, extrasaction="ignore")
         writer.writeheader()
@@ -224,7 +226,7 @@ def save_and_report(results):
         },
     }
 
-    json_path = "output/baseline_params.json"
+    json_path = os.path.join(OUTDIR, "baseline_params.json")
     with open(json_path, "w") as f:
         json.dump(baseline, f, indent=2)
     print(f"  Saved: {json_path}")
@@ -249,7 +251,7 @@ def save_and_report(results):
         print(f"  {name:<22}  {dial:<25}  {tgt_str:>10}  {val:>9.1f}  {std:>6.2f}  {mark:>8}")
     print(f"{'─'*72}")
     print()
-    print(f"  Review output/baseline_params.json and confirm before updating params.py.")
+    print(f"  Review output/calibration/baseline_params.json and confirm before updating params.py.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

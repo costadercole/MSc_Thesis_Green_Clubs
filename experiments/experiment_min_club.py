@@ -15,8 +15,9 @@ Secondary     : hysteresis line at mu=lambda=1 — fine s0 sweep, more seeds, fi
 Run:
   python experiments/experiment_min_club.py            # full 30×30×4, T=2000 + hysteresis
   python experiments/experiment_min_club.py --quick     # coarse 12×12×2, T=1000
-Outputs: output/expB_s0_map.{npz,png}, output/expB_hysteresis.{npz,png},
-         headline numbers appended to output/results_notes.md
+Outputs: output/experiment_min_club/expB_s0_map[_phiXXXX].{csv,png},
+         output/experiment_min_club/expB_hysteresis[_phiXXXX].{csv,png};
+         headline numbers print to stdout.
 """
 
 import os, sys, argparse
@@ -28,6 +29,9 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sweep_lib import (run_grid, save_csv, plot_grid, modal_regime, p_green,
                        REGIME_GREEN, BASELINE)
+
+OUTDIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "output", "experiment_min_club")
 
 MU_TICKS = [0.02, 0.05, 0.1, 0.5, 1, 5, 10, 20]
 H0_DIRTY = 0.9
@@ -62,13 +66,13 @@ def run_primary(nx, ny, seeds, T, phi, delta_loc, suffix=""):
                    dict(lam=1.0, nu=1.0, h0=H0_DIRTY, phi=phi, delta_loc=delta_loc),
                    seeds=seeds, T=T)
     tag = f"expB_s0_map{suffix}"
-    save_csv(res, tag)
+    save_csv(res, tag, outdir=OUTDIR)
     plot_grid(res, tag,
               f"Coalition nucleation: outcome over mobility $\\mu$ and initial club size $s_0$"
               f"   ($\\varphi={phi:g}$)",
               xlabel="$\\mu$  (firm mobility = $\\mu/\\lambda$)",
               ylabel="$s_0$  (initial strict fraction)",
-              xlog=True, xticks=MU_TICKS)
+              outdir=OUTDIR, xlog=True, xticks=MU_TICKS)
     return res
 
 
@@ -78,7 +82,7 @@ def run_hysteresis(n_s0, seeds, T, phi, delta_loc, suffix=""):
     res = run_grid("s0", np.linspace(0.0, 1.0, n_s0), "lam", np.array([1.0]),
                    dict(mu=1.0, nu=1.0, h0=H0_DIRTY, phi=phi, delta_loc=delta_loc),
                    seeds=seeds, T=T)
-    save_csv(res, f"expB_hysteresis{suffix}")
+    save_csv(res, f"expB_hysteresis{suffix}", outdir=OUTDIR)
     s0 = res["xvals"]
     s_mean = np.nanmean(res["S"][0], axis=1)            # mean final s per s0
     s_all  = res["S"][0]                                # (n_s0, seeds)
@@ -100,7 +104,7 @@ def run_hysteresis(n_s0, seeds, T, phi, delta_loc, suffix=""):
     ax.set_ylabel("steady-state strict fraction  $s$")
     ax.set_title(f"Hysteresis / tipping at $\\mu=\\lambda=1$ (dirty start $h_0=0.9$, $\\varphi={phi:g}$)")
     ax.set_ylim(-0.03, 1.03); ax.legend(loc="lower right", framealpha=0.9)
-    out = f"output/expB_hysteresis{suffix}.png"
+    out = os.path.join(OUTDIR, f"expB_hysteresis{suffix}.png")
     fig.tight_layout(); fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  saved {out}")

@@ -257,6 +257,7 @@ def plot_grid(res, name, title, xlabel, ylabel, outdir="output",
 
     fig.suptitle(title, fontsize=13, y=1.02)
     fig.tight_layout()
+    os.makedirs(outdir, exist_ok=True)
     out = os.path.join(outdir, f"{name}.png")
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)

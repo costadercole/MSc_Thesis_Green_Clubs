@@ -12,7 +12,7 @@ Reads output/phase_<preset>.csv and produces a thesis-ready figure:
 Run:
   python experiments/replot_phase.py speed
   python experiments/replot_phase.py structural
-Outputs: output/phase_<preset>_final.png
+Outputs: output/experiment_1/phase_<preset>_final.png
 """
 
 import sys, os, csv, argparse
@@ -22,6 +22,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, BoundaryNorm
 from matplotlib.ticker import FuncFormatter
+
+OUTDIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "output", "experiment_1")
 
 REGIME_TO_INT = {"race_to_bottom": 0, "transitional": 1, "green_club": 2}
 REGIME_LABELS = ["race-to-bottom", "transitional /\ncontested", "green club"]
@@ -34,7 +37,7 @@ ANCHOR = {"phi": 1500.0, "delta_loc": 1000.0}   # marked on the structural map
 
 
 def load_grid(preset):
-    path = f"output/phase_{preset}.csv"
+    path = os.path.join(OUTDIR, f"phase_{preset}.csv")
     rows = list(csv.DictReader(open(path)))
     xname, yname = list(rows[0].keys())[0], list(rows[0].keys())[1]
     xs = sorted({float(r[xname]) for r in rows})
@@ -121,7 +124,7 @@ def plot(preset):
         title = "Regulatory outcome by host benefit $\\varphi$ and local damage $\\delta_{loc}$"
     fig.suptitle(title, fontsize=13, y=1.02)
     fig.tight_layout()
-    out = f"output/phase_{preset}_final.png"
+    out = os.path.join(OUTDIR, f"phase_{preset}_final.png")
     fig.savefig(out, dpi=150, bbox_inches="tight")
     print(f"  saved {out}")
 
@@ -130,5 +133,5 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("preset", choices=["speed", "structural"])
     args = ap.parse_args()
-    os.makedirs("output", exist_ok=True)
+    os.makedirs(OUTDIR, exist_ok=True)
     plot(args.preset)

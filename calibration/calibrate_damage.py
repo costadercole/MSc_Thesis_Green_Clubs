@@ -30,8 +30,8 @@ Why sweep phi (not delta_glob)?
 
 Output
 ------
-  output/damage_calibration.csv   — win_rate for each (phi, delta_loc) pair
-  output/damage_calibration.png   — heatmap, target band contour overlaid
+  output/calibration/damage_calibration.csv   — win_rate for each (phi, delta_loc) pair
+  output/calibration/damage_calibration.png   — heatmap, target band contour overlaid
 
 Run: python calibration/calibrate_damage.py
 """
@@ -167,9 +167,11 @@ def run_sweep():
 # ── Save + plot ───────────────────────────────────────────────────────────────
 
 def save_and_plot(results):
-    os.makedirs("output", exist_ok=True)
+    outdir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "output", "calibration")
+    os.makedirs(outdir, exist_ok=True)
 
-    csv_path = "output/damage_calibration.csv"
+    csv_path = os.path.join(outdir, "damage_calibration.csv")
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["phi", "delta_loc",
                                                 "win_rate", "win_rate_std", "in_band"])
@@ -208,7 +210,7 @@ def save_and_plot(results):
                  fontsize=11)
     fig.tight_layout()
 
-    png_path = "output/damage_calibration.png"
+    png_path = os.path.join(outdir, "damage_calibration.png")
     fig.savefig(png_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved: {png_path}")

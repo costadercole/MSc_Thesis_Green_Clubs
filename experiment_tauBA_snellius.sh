@@ -29,6 +29,6 @@ python -c "import numpy, scipy, matplotlib, networkx" \
 mkdir -p logs
 
 # 5. Run Experiment A (CBAM): mu x tau_BA and mu x tau, 6 seeds, lever range [0,1]
-#    Produces only output/expA_tauBA_map.{png,csv} and output/expA_tau_map.{png,csv};
+#    Produces only output/experiment_tauBA/expA_tauBA_map.{png,csv} and output/experiment_tauBA/expA_tau_map.{png,csv};
 #    headline numbers print to this job's .out log.
 python experiments/experiment_tauBA.py --seeds 6 --tauba_max 1.0 --tau_max 1.0
